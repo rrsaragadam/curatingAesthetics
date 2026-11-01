@@ -25,10 +25,10 @@ struct ProductDetails: Equatable {
         Fabric.guess(from: name) ?? Fabric.guess(from: material) ?? Fabric.guess(from: description)
     }
 
-    /// The title names the cut most directly ("Wide Pants"), then the store's own
-    /// silhouette and fit labels, then the description.
+    /// The store's own silhouette comes first, then the title ("Wide Pants"),
+    /// the store's fit label, and the description.
     var silhouetteGuess: Silhouette? {
-        Silhouette.guess(from: name) ?? Silhouette.guess(from: silhouetteLine, labeled: true)
+        Silhouette.guess(from: silhouetteLine, labeled: true) ?? Silhouette.guess(from: name)
             ?? Silhouette.guess(from: fitLine, labeled: true) ?? Silhouette.guess(from: description)
     }
 
@@ -190,6 +190,9 @@ enum ProductImporter {
         let text = plainText(fromHTML: html)
         if d.material.isEmpty { d.material = findComposition(in: text) ?? "" }
         if d.care.isEmpty { d.care = findCare(in: text) ?? "" }
+        // A store's silhouette filter value (Uniqlo: "groupName":"Silhouette" … "tagName":"Barrel")
+        // is kept more carefully than its prose, so it wins.
+        if let tagged = silhouetteTag(in: html) { d.silhouetteLine = tagged }
         if d.silhouetteLine.isEmpty { d.silhouetteLine = findLabeled("silhouette", in: text) ?? "" }
         // The color picked in the link beats the page's default color.
         if let picked = colorName(forCodesIn: pageURL, html: html) { d.colorWord = picked }
@@ -373,6 +376,15 @@ enum ProductImporter {
         let ns = text as NSString
         guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
         return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The silhouette a store tags the product with in its page data.
+    static func silhouetteTag(in html: String) -> String? {
+        let pattern = #"(?i)"(?:groupName|name|label|attribute)"\s*:\s*"silhouette"[^{}]{0,80}?"(?:tagName|value|displayValue)"\s*:\s*"([^"]{2,24})""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = html as NSString
+        guard let m = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: m.range(at: 1))
     }
 
     /// The name a store gives the color code in the link, from its page data:
