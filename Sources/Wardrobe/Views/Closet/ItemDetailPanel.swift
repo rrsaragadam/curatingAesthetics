@@ -35,7 +35,11 @@ struct ItemDetailPanel: View {
                     VStack(alignment: .leading, spacing: 8) {
                         DetailRow(label: "Texture", value: item.fabric == .unknown ? "" : item.fabric.label,
                                   swatch: AnyView(FabricSwatch(hex: item.colorHex, fabric: item.fabric, size: 14)))
-                        DetailRow(label: "Silhouette", value: item.silhouette == .unknown ? "" : item.silhouette.label)
+                        if item.category == .shoes {
+                            DetailRow(label: "Type", value: item.shoeType == .unknown ? "" : item.shoeType.label)
+                        } else {
+                            DetailRow(label: "Silhouette", value: item.silhouette == .unknown ? "" : item.silhouette.label)
+                        }
                         DetailRow(label: "Material", value: item.material)
                         DetailRow(label: "Size", value: item.size)
                         if !item.care.isEmpty { DetailRow(label: "Care", value: item.care) }
@@ -72,6 +76,8 @@ struct ItemDetailPanel: View {
             Theme.linen
             GarmentView(item: item)
                 .padding(34)
+                // Centered, not pinned to the corner with the heart button.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 10)
                 .id(item.id)
                 .transition(reduceMotion ? .opacity : .asymmetric(

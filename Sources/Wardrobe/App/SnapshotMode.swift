@@ -18,6 +18,11 @@ enum SnapshotMode {
         let path = ProcessInfo.processInfo.environment["WARDROBE_STORE"] ?? "/tmp/Wardrobe-snapshot-store"
         let url = URL(fileURLWithPath: path, isDirectory: true)
         try? FileManager.default.removeItem(at: url)
+        // `WARDROBE_STORE_FROM=<library folder>` starts from a copy of a real
+        // library instead of an empty one. The original is never touched.
+        if let from = ProcessInfo.processInfo.environment["WARDROBE_STORE_FROM"] {
+            try? FileManager.default.copyItem(at: URL(fileURLWithPath: from, isDirectory: true), to: url)
+        }
         return url
     }()
 
@@ -52,6 +57,10 @@ enum SnapshotMode {
             nav.collection = .all
         },
         Shot(name: "closet-detail") { store, nav in nav.selectedItemID = store.items.first?.id },
+        Shot(name: "closet-detail-last") { store, nav in nav.selectedItemID = store.items.last?.id },
+        Shot(name: "closet-detail-shoes") { store, nav in
+            nav.selectedItemID = store.items.first { $0.category == .shoes }?.id
+        },
         Shot(name: "favorites") { _, nav in nav.selectedItemID = nil; nav.collection = .favorites },
         Shot(name: "in-season") { _, nav in nav.collection = .inSeason },
         Shot(name: "rarely-worn") { _, nav in nav.collection = .rarelyWorn },

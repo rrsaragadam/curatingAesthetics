@@ -12,10 +12,12 @@ enum SampleCloset {
                    fabric: Fabric, material: String, size: String, seasons: Set<Season>,
                    formality: Formality, worn: Int, lastWorn: Double, favorite: Bool = false,
                    care: String = "") -> ClothingItem {
-            ClothingItem(name: name, category: category, colorHex: hex, colorName: colorName,
-                         seasons: seasons, formality: formality, fabric: fabric, material: material,
-                         size: size, care: care, tags: [tag], favorite: favorite, imageFile: nil,
-                         addedAt: daysAgo(200), timesWorn: worn, lastWornAt: daysAgo(lastWorn))
+            var item = ClothingItem(name: name, category: category, colorHex: hex, colorName: colorName,
+                                    seasons: seasons, formality: formality, fabric: fabric, material: material,
+                                    size: size, care: care, tags: [tag], favorite: favorite, imageFile: nil,
+                                    addedAt: daysAgo(200), timesWorn: worn, lastWornAt: daysAgo(lastWorn))
+            if category == .shoes { item.shoeType = ShoeType.guess(from: name) ?? .unknown }
+            return item
         }
 
         let oxford = piece("Oxford shirt", .top, "#DCE6F2", "Pale blue", fabric: .oxford, material: "100% cotton",

@@ -103,7 +103,9 @@ struct ClothingItem: Identifiable, Hashable {
     var seasons: Set<Season> = []
     var formality: Formality = .casual
     var fabric: Fabric = .unknown
+    /// Shoes use `shoeType` instead.
     var silhouette: Silhouette = .unknown
+    var shoeType: ShoeType = .unknown
     /// Free text from the tag or product page, e.g. "100% merino wool".
     var material: String = ""
     var size: String = ""
@@ -141,14 +143,15 @@ struct ClothingItem: Identifiable, Hashable {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return true }
         let haystack = ([name, brand, displayColorName, colorFamily.label, category.label, category.singular,
-                         fabric.label, silhouette == .unknown ? "" : silhouette.label, material, size, notes] + tags).joined(separator: " ").lowercased()
+                         fabric.label, silhouette == .unknown ? "" : silhouette.label,
+                         shoeType == .unknown ? "" : shoeType.label, material, size, notes] + tags).joined(separator: " ").lowercased()
         return q.split(separator: " ").allSatisfy { haystack.contains($0) }
     }
 }
 
 extension ClothingItem: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, name, category, colorHex, colorName, brand, seasons, formality, fabric, silhouette, material, size, care
+        case id, name, category, colorHex, colorName, brand, seasons, formality, fabric, silhouette, shoeType, material, size, care
         case tags, notes, favorite, imageFile, sourceURL, addedAt, timesWorn, lastWornAt
     }
 
@@ -166,6 +169,7 @@ extension ClothingItem: Codable {
         formality = (try? c.decodeIfPresent(Formality.self, forKey: .formality)) ?? .casual
         fabric = (try? c.decodeIfPresent(Fabric.self, forKey: .fabric)) ?? .unknown
         silhouette = (try? c.decodeIfPresent(Silhouette.self, forKey: .silhouette)) ?? .unknown
+        shoeType = (try? c.decodeIfPresent(ShoeType.self, forKey: .shoeType)) ?? .unknown
         material = try c.decodeIfPresent(String.self, forKey: .material) ?? ""
         size = try c.decodeIfPresent(String.self, forKey: .size) ?? ""
         care = try c.decodeIfPresent(String.self, forKey: .care) ?? ""

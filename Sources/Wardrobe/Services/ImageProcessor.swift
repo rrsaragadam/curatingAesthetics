@@ -71,9 +71,10 @@ enum ImageProcessor {
             var top: CGFloat, bottom: CGFloat, xRange: [CGFloat], padX: CGFloat
             switch category {
             case .top, .outerwear:
-                guard let s = shoulders.min(), let h = hips.max(), !arms.isEmpty else { return nil }
+                guard let s = shoulders.min(), !arms.isEmpty else { return nil }
                 top = s - 0.05
-                bottom = h + (category == .outerwear ? 0.14 : 0.07)
+                // A half-length shot ends above the hips; the piece runs to the edge.
+                bottom = hips.max().map { $0 + (category == .outerwear ? 0.14 : 0.07) } ?? 1
                 xRange = arms; padX = 0.07
             case .dress:
                 guard let s = shoulders.min(), let low = (ankles + knees).max(), !arms.isEmpty else { return nil }

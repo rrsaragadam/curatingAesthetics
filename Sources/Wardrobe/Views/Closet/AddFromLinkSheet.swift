@@ -260,12 +260,21 @@ struct AddFromLinkSheet: View {
                         .fixedSize()
                     }
                     HStack(spacing: 10) {
-                        Text("Silhouette").foregroundStyle(Theme.inkTertiary).frame(width: 72, alignment: .leading)
-                        Picker("Silhouette", selection: $draft.silhouette) {
-                            ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
+                        if draft.category == .shoes {
+                            Text("Type").foregroundStyle(Theme.inkTertiary).frame(width: 72, alignment: .leading)
+                            Picker("Type", selection: $draft.shoeType) {
+                                ForEach(ShoeType.allCases) { Text($0.label).tag($0) }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                        } else {
+                            Text("Silhouette").foregroundStyle(Theme.inkTertiary).frame(width: 72, alignment: .leading)
+                            Picker("Silhouette", selection: $draft.silhouette) {
+                                ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
                         }
-                        .labelsHidden()
-                        .fixedSize()
                     }
                     DetailRow(label: "Material", value: draft.material)
                     DetailRow(label: "Color", value: draft.displayColorName,
@@ -389,13 +398,17 @@ struct AddFromLinkSheet: View {
         func rightColor(_ photo: PagePhoto) -> Bool {
             if photo.inLinkColor { return true }
             guard let reference, let color = photo.check.pieceColor else { return !hasColor }
-            return color.distance(to: reference) < 22
+            return color.distance(to: reference) < 12
         }
         let products = photos.filter(\.check.isProductShot)
+        // A product shot of unknown color only beats the model photos when
+        // none of them is in the link's color either.
+        let inColor = photos.filter(\.inLinkColor)
         return products.first(where: rightColor)
-            ?? photos.first { $0.inLinkColor && $0.crop(for: category) != nil }
-            ?? products.first
+            ?? inColor.first { $0.crop(for: category) != nil }
+            ?? (inColor.isEmpty ? products.first : nil)
             ?? photos.first { $0.crop(for: category) != nil }
+            ?? inColor.first
             ?? photos.first
     }
 
@@ -449,6 +462,7 @@ struct AddFromLinkSheet: View {
             item.care = details.care
             item.fabric = details.fabricGuess ?? .unknown
             item.silhouette = details.silhouetteGuess ?? .unknown
+            item.shoeType = ShoeType.guess(from: details.name) ?? ShoeType.guess(from: details.breadcrumbs) ?? .unknown
             item.sourceURL = url.absoluteString
             if !details.colorWord.isEmpty {
                 item.colorName = details.colorWord.split(separator: "/").first.map {
