@@ -58,13 +58,17 @@ enum Theme {
 /// Bricolage Grotesque for headings and numbers; the system font for everything else.
 enum Typeface {
     static func registerBundledFonts() {
-        let urls = Bundle.module.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts") ?? []
+        let urls = ["ttf", "woff2"].flatMap { Bundle.module.urls(forResourcesWithExtension: $0, subdirectory: "Fonts") ?? [] }
         for url in urls {
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
     }
 
     static func display(_ size: CGFloat, bold: Bool = true) -> Font {
+        // Geist Serif comes in one weight; a touch larger keeps headings as strong.
+        if NSFont(name: "GeistSerif-Regular", size: size) != nil {
+            return .custom("GeistSerif-Regular", size: (size * 1.1).rounded())
+        }
         let name = bold ? "BricolageGrotesque-Bold" : "BricolageGrotesque-SemiBold"
         if NSFont(name: name, size: size) != nil {
             return .custom(name, size: size)
