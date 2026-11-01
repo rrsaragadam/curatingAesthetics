@@ -14,9 +14,7 @@ struct ItemDetailPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(item.name)
-                            .font(Typeface.display(23))
-                            .fixedSize(horizontal: false, vertical: true)
+                        NameField(item: item)
                         HStack(spacing: 6) {
                             Circle().fill(Color(hex: item.colorHex))
                                 .overlay { Circle().strokeBorder(.black.opacity(0.12)) }
@@ -264,5 +262,44 @@ struct ClosetEmptyState: View {
             return !urls.isEmpty
         } isTargeted: { dropTargeted = $0 }
         .onAppear { withAnimation(Motion.settle.delay(0.1)) { appeared = true } }
+    }
+}
+
+/// The piece's name, renamed in place: click, type, press Return.
+private struct NameField: View {
+    let item: ClothingItem
+    @Environment(WardrobeStore.self) private var store
+    @State private var text = ""
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Name", text: $text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(Typeface.display(23))
+            .focused($focused)
+            .onSubmit { commit() }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Theme.ink.opacity(focused ? 0.06 : (hovering ? 0.04 : 0)))
+            }
+            .padding(.horizontal, -6)
+            .onHover { hovering = $0 }
+            .help("Click to rename")
+            .onAppear { text = item.name }
+            .onChange(of: item.id) { text = item.name }
+            .onChange(of: item.name) { if !focused { text = item.name } }
+            .onChange(of: focused) { if !focused { commit() } }
+    }
+
+    private func commit() {
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { text = item.name; return }
+        guard name != item.name, var current = store.item(id: item.id) else { return }
+        current.name = name
+        store.update(current)
+        focused = false
     }
 }

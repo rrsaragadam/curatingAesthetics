@@ -35,6 +35,10 @@ struct AddFromLinkSheet: View {
     @State private var photos: [PagePhoto] = []
     @State private var chosenPhoto: UUID?
     @State private var photoTask: Task<Void, Never>?
+    /// Set when the store wouldn't share its page, so the details come from
+    /// the link and the photo from the person's browser.
+    @State private var blockedHost: String?
+    @State private var dropTargeted = false
     @State private var brandLine = ""
     @State private var task: Task<Void, Never>?
     @FocusState private var linkFocused: Bool
@@ -205,14 +209,37 @@ struct AddFromLinkSheet: View {
     }
 
     private var preview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let blockedHost { blockedNote(blockedHost) }
+            previewBody
+        }
+    }
+
+    private func blockedNote(_ host: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "hand.raised.fill").foregroundStyle(Theme.amber)
+            Text("\(host) didn't share this product's details with Wardrobe, so check the ones below. For the photo, drag it here from your browser, or copy it (Control-click, Copy Image) and press Paste photo.")
+                .font(.system(size: 12.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.amberTonal, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var previewBody: some View {
         HStack(alignment: .top, spacing: 20) {
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.linen)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Theme.green, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .opacity(dropTargeted ? 1 : 0)
                 Group {
                     if let previewImage {
                         Image(nsImage: previewImage).resizable().interpolation(.high).scaledToFit()
                     } else {
                         GarmentIllustration(category: draft.category, hex: draft.colorHex, fabric: draft.fabric)
+                            .opacity(blockedHost == nil ? 1 : 0.35)
                     }
                 }
                 .padding(20)
@@ -232,7 +259,17 @@ struct AddFromLinkSheet: View {
             .overlay {
                 if photoTask != nil {
                     ProgressView().controlSize(.small)
+                } else if blockedHost != nil && previewImage == nil {
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.badge.plus").font(.system(size: 22))
+                        Button("Paste photo", action: pastePhoto).buttonStyle(.quiet)
+                    }
+                    .foregroundStyle(Theme.inkSecondary)
                 }
+            }
+            .onDrop(of: [.image, .url], isTargeted: $dropTargeted) { providers in
+                loadDropped(providers)
+                return true
             }
             .overlay(alignment: .bottom) {
                 if photos.count > 1 { photoStrip.offset(y: 46) }
@@ -245,9 +282,17 @@ struct AddFromLinkSheet: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.inkSecondary)
                 }
+                // Looks like a field so it's clear the store's name can be changed.
                 TextField("Name", text: $draft.name)
                     .textFieldStyle(.plain)
                     .font(Typeface.display(20))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line)
+                    }
+                    .help("Rename the piece")
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
@@ -358,6 +403,76 @@ struct AddFromLinkSheet: View {
         }
     }
 
+    /// The store refused the page: fill in what the link itself says and let
+    /// the person bring the photo.
+    private func startFromLinkOnly(_ url: URL) {
+        let host = ProductDetails.host(of: url)
+        var item = ClothingItem(name: ProductImporter.name(fromLink: url),
+                                category: CategoryGuesser.guess(from: url.path()) ?? .top)
+        item.brand = ProductImporter.brand(fromHost: host)
+        item.sourceURL = url.absoluteString
+        item.shoeType = ShoeType.guess(from: url.path()) ?? .unknown
+        draft = item
+        sizes = []
+        photos = []
+        png = nil
+        previewImage = nil
+        backgroundRemoved = false
+        blockedHost = host
+        brandLine = [item.brand, host].filter { !$0.isEmpty }.joined(separator: " · ")
+        withAnimation(Motion.respecting(reduceMotion, Motion.settle)) { phase = .preview }
+    }
+
+    private func pastePhoto() {
+        let board = NSPasteboard.general
+        if let image = NSImage(pasteboard: board) {
+            usePhoto(image)
+        } else if let text = board.string(forType: .string), let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  url.scheme?.hasPrefix("http") == true {
+            downloadPhoto(url)
+        }
+    }
+
+    private func loadDropped(_ providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+        if provider.canLoadObject(ofClass: NSImage.self) {
+            _ = provider.loadObject(ofClass: NSImage.self) { object, _ in
+                guard let image = object as? NSImage else { return }
+                Task { @MainActor in usePhoto(image) }
+            }
+        } else if provider.canLoadObject(ofClass: URL.self) {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in
+                    if url.isFileURL, let image = NSImage(contentsOf: url) { usePhoto(image) } else { downloadPhoto(url) }
+                }
+            }
+        }
+    }
+
+    private func downloadPhoto(_ url: URL) {
+        Task { @MainActor in
+            let referer = URL(string: draft.sourceURL ?? "") ?? url
+            if let data = try? await ProductImporter.downloadImage(url, referer: referer), let image = NSImage(data: data) {
+                usePhoto(image, data: data)
+            }
+        }
+    }
+
+    /// Adds a photo the person brought and shows it like a page photo.
+    private func usePhoto(_ image: NSImage, data: Data? = nil) {
+        guard let data = data ?? image.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) })
+        else { return }
+        let category = draft.category
+        Task { @MainActor in
+            guard let check = await ImageProcessor.check(imageData: data, category: category) else { return }
+            let photo = PagePhoto(data: data, thumbnail: image, check: check, inLinkColor: true)
+            photos.append(photo)
+            if let color = check.pieceColor, draft.colorName.isEmpty { draft.colorName = ColorNamer.name(for: color) }
+            choose(photo)
+        }
+    }
+
     private func apply(_ processed: ProcessedImage) {
         png = processed.png
         previewImage = NSImage(data: processed.png)
@@ -428,7 +543,14 @@ struct AddFromLinkSheet: View {
     private func run(_ url: URL) async {
         setStep(0)
         do {
-            let details = try await ProductImporter.fetchDetails(from: url)
+            let details: ProductDetails
+            do {
+                details = try await ProductImporter.fetchDetails(from: url)
+            } catch ProductImporter.Failure.blocked, ProductImporter.Failure.nothingFound {
+                // Some stores (adidas) turn apps away or send a page with no product on it.
+                startFromLinkOnly(url)
+                return
+            }
             try Task.checkCancellation()
 
             setStep(1)

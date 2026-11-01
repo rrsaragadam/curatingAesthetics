@@ -32,8 +32,10 @@ struct ProductDetails: Equatable {
             ?? Silhouette.guess(from: fitLine, labeled: true) ?? Silhouette.guess(from: description)
     }
 
-    var host: String {
-        let h = sourceURL.host() ?? sourceURL.absoluteString
+    var host: String { Self.host(of: sourceURL) }
+
+    static func host(of url: URL) -> String {
+        let h = url.host() ?? url.absoluteString
         return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
     }
 
@@ -58,6 +60,25 @@ enum ProductImporter {
     }
 
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+
+    /// A name from the link alone, for stores that won't share their page:
+    /// ".../samba-og-shoes/B75806.html" becomes "Samba OG Shoes".
+    static func name(fromLink url: URL) -> String {
+        let parts = url.pathComponents.reversed().map { ($0 as NSString).deletingPathExtension }
+        // Skip product codes such as "B75806"; take the first part that reads as words.
+        let words = parts.first { part in
+            let tokens = part.split(whereSeparator: { $0 == "-" || $0 == "_" })
+            return tokens.count >= 2 && tokens.filter { $0.allSatisfy(\.isLetter) }.count >= 2
+        } ?? ""
+        return words.split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .map { $0.count <= 2 ? $0.uppercased() : $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    /// "adidas.ca" becomes "adidas".
+    static func brand(fromHost host: String) -> String {
+        host.split(separator: ".").first.map(String.init) ?? ""
+    }
 
     static func normalizedURL(from text: String) -> URL? {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,6 +191,9 @@ enum ProductImporter {
         if d.material.isEmpty { d.material = findComposition(in: text) ?? "" }
         if d.care.isEmpty { d.care = findCare(in: text) ?? "" }
         if d.silhouetteLine.isEmpty { d.silhouetteLine = findLabeled("silhouette", in: text) ?? "" }
+        // The color picked in the link beats the page's default color.
+        if let picked = colorName(forCodesIn: pageURL, html: html) { d.colorWord = picked }
+        if d.colorWord.isEmpty, let shown = findLabeled("colou?r", in: text) { d.colorWord = cleanColorWord(shown) }
         if d.fitLine.isEmpty { d.fitLine = findLabeled("fit", in: text) ?? "" }
 
         d.name = cleanTitle(d.name, brand: d.brand, host: d.host)
@@ -349,6 +373,27 @@ enum ProductImporter {
         let ns = text as NSString
         guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
         return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The name a store gives the color code in the link, from its page data:
+    /// `"displayCode":"66","name":"BLUE"` for "?colorDisplayCode=66".
+    static func colorName(forCodesIn pageURL: URL, html: String) -> String? {
+        for code in colorCodes(in: pageURL) {
+            let escaped = NSRegularExpression.escapedPattern(for: code)
+            let pattern = #"(?i)"[a-z]*code"\s*:\s*"(?:col)?"# + escaped + #""\s*,\s*"name"\s*:\s*"([^"]{2,30})""#
+            if let r = html.range(of: pattern, options: .regularExpression),
+               let name = String(html[r]).components(separatedBy: "\"").dropLast().last {
+                return cleanColorWord(name)
+            }
+        }
+        return nil
+    }
+
+    /// "66 BLUE" becomes "Blue", "NAVY" becomes "Navy".
+    static func cleanColorWord(_ word: String) -> String {
+        let trimmed = word.replacingOccurrences(of: #"^\d+\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return trimmed.lowercased().split(separator: " ").map { $0.capitalized }.joined(separator: " ")
     }
 
     static func findCare(in text: String) -> String? {
