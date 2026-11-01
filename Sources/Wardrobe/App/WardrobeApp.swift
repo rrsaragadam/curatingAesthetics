@@ -74,6 +74,8 @@ final class AppNavigation {
     var selectedItemID: UUID?
     var showPhotoImporter = false
     var showAddFromLink = false
+    /// A product link for the link sheet to fetch as soon as it opens.
+    var linkToAdd: String?
     /// Set by "Style this piece"; the builder places it and clears this.
     var pieceToStyle: UUID?
     /// Set from the lookbook to reopen an outfit in the builder.

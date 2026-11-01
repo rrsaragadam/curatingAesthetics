@@ -23,10 +23,28 @@ enum SnapshotMode {
 
     private struct Shot {
         let name: String
+        var wait: Double = 1.2
         let setUp: @MainActor (WardrobeStore, AppNavigation) -> Void
     }
 
-    private static let shots: [Shot] = [
+    /// `WARDROBE_SNAPSHOT_LINK=<product url>` adds a shot of that page imported
+    /// in the link sheet. It needs the network, so it waits longer.
+    private static var linkShots: [Shot] {
+        guard let link = ProcessInfo.processInfo.environment["WARDROBE_SNAPSHOT_LINK"] else { return [] }
+        return [Shot(name: "add-from-link-preview", wait: 25) { _, nav in
+            // Close the sheet from the previous shot first, so it reopens fresh.
+            nav.showAddFromLink = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                nav.linkToAdd = link
+                nav.showAddFromLink = true
+            }
+        }]
+    }
+
+    private static var shots: [Shot] { baseShots + linkShots }
+
+    private static let baseShots: [Shot] = [
         Shot(name: "closet-empty") { _, nav in nav.section = .closet },
         Shot(name: "closet") { store, nav in
             store.loadSampleCloset()
@@ -50,9 +68,9 @@ enum SnapshotMode {
             try? await Task.sleep(for: .seconds(1.5))
             for shot in shots {
                 shot.setUp(store, nav)
-                for mode in ["light", "dark"] {
+                for (index, mode) in ["light", "dark"].enumerated() {
                     NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
-                    try? await Task.sleep(for: .seconds(1.2))
+                    try? await Task.sleep(for: .seconds(index == 0 ? shot.wait : 1.2))
                     capture(outputURL.appendingPathComponent("\(shot.name)-\(mode).png"))
                 }
             }

@@ -23,3 +23,8 @@ WARDROBE_SNAPSHOT=/tmp/Wardrobe-shots caffeinate -dimsu .build/debug/Wardrobe
 fail with "could not create image from window". Screens are listed in
 `Sources/Wardrobe/App/SnapshotMode.swift`. Delete saved split view widths
 first with `defaults delete Wardrobe` when checking first-launch layout.
+
+Add `WARDROBE_SNAPSHOT_LINK=<product url>` to also capture that page imported
+in the Add from link sheet (needs the network). A good test is a Uniqlo page,
+where every photo of the chosen color has a model in it:
+`https://www.uniqlo.com/ca/en/products/E471809-000/00?colorDisplayCode=09`

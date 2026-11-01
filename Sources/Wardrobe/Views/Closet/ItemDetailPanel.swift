@@ -35,6 +35,7 @@ struct ItemDetailPanel: View {
                     VStack(alignment: .leading, spacing: 8) {
                         DetailRow(label: "Texture", value: item.fabric == .unknown ? "" : item.fabric.label,
                                   swatch: AnyView(FabricSwatch(hex: item.colorHex, fabric: item.fabric, size: 14)))
+                        DetailRow(label: "Silhouette", value: item.silhouette == .unknown ? "" : item.silhouette.label)
                         DetailRow(label: "Material", value: item.material)
                         DetailRow(label: "Size", value: item.size)
                         if !item.care.isEmpty { DetailRow(label: "Care", value: item.care) }

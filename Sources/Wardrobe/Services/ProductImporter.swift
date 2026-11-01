@@ -12,6 +12,9 @@ struct ProductDetails: Equatable {
     var sizes: [String] = []
     var description: String = ""
     var breadcrumbs: String = ""
+    /// The value of a "Silhouette:" or "Fit:" line or property, e.g. "Straight".
+    var silhouetteLine: String = ""
+    var fitLine: String = ""
 
     var categoryGuess: Category? {
         CategoryGuesser.guess(from: name) ?? CategoryGuesser.guess(from: breadcrumbs) ?? CategoryGuesser.guess(from: description)
@@ -20,6 +23,13 @@ struct ProductDetails: Equatable {
     var fabricGuess: Fabric? {
         // The title and material line are the most reliable; the description last.
         Fabric.guess(from: name) ?? Fabric.guess(from: material) ?? Fabric.guess(from: description)
+    }
+
+    /// The title names the cut most directly ("Wide Pants"), then the store's own
+    /// silhouette and fit labels, then the description.
+    var silhouetteGuess: Silhouette? {
+        Silhouette.guess(from: name) ?? Silhouette.guess(from: silhouetteLine, labeled: true)
+            ?? Silhouette.guess(from: fitLine, labeled: true) ?? Silhouette.guess(from: description)
     }
 
     var host: String {
@@ -124,6 +134,8 @@ enum ProductImporter {
         d.description = String(body.prefix(600))
         d.material = findComposition(in: body) ?? ""
         d.care = findCare(in: body) ?? ""
+        d.silhouetteLine = findLabeled("silhouette", in: body) ?? ""
+        d.fitLine = findLabeled("fit", in: body) ?? ""
         return d
     }
 
@@ -157,10 +169,12 @@ enum ProductImporter {
         let text = plainText(fromHTML: html)
         if d.material.isEmpty { d.material = findComposition(in: text) ?? "" }
         if d.care.isEmpty { d.care = findCare(in: text) ?? "" }
+        if d.silhouetteLine.isEmpty { d.silhouetteLine = findLabeled("silhouette", in: text) ?? "" }
+        if d.fitLine.isEmpty { d.fitLine = findLabeled("fit", in: text) ?? "" }
 
         d.name = cleanTitle(d.name, brand: d.brand, host: d.host)
         d.sizes = orderedSizes(d.sizes)
-        d.imageURLs = dedupe(d.imageURLs)
+        d.imageURLs = dedupe(d.imageURLs + relatedImages(in: html, to: d.imageURLs, pageURL: pageURL))
         return d
     }
 
@@ -185,6 +199,10 @@ enum ProductImporter {
                     if d.material.isEmpty { d.material = value }
                 } else if name.contains("care") {
                     if d.care.isEmpty { d.care = value }
+                } else if name.contains("silhouette") || name == "cut" {
+                    if d.silhouetteLine.isEmpty { d.silhouetteLine = value }
+                } else if name.contains("fit") {
+                    if d.fitLine.isEmpty { d.fitLine = value }
                 } else if name.contains("color") || name.contains("colour") {
                     if d.colorWord.isEmpty { d.colorWord = value }
                 }
@@ -324,6 +342,15 @@ enum ProductImporter {
         return found.prefix(1).uppercased() + found.dropFirst()
     }
 
+    /// The value after a label such as "Silhouette: Straight" or "Fit - Relaxed".
+    static func findLabeled(_ label: String, in text: String) -> String? {
+        let pattern = "(?i)\\b\(label)\\s*[:\\-–]\\s*([A-Za-z][A-Za-z -]{1,24}?)(?=[.,;|<]|\\s-|\\s{2}|$)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = text as NSString
+        guard let m = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+    }
+
     static func findCare(in text: String) -> String? {
         let pattern = "(?i)(machine wash|hand wash|dry clean|wash cold|cold wash|do not wash|spot clean|wash at \\d+)[^.;|]{0,70}"
         guard let r = text.range(of: pattern, options: .regularExpression) else { return nil }
@@ -367,9 +394,63 @@ enum ProductImporter {
         return unique
     }
 
+    /// Drops repeats, treating resized copies ("photo.jpg?width=600") as the same photo.
     private static func dedupe(_ urls: [URL]) -> [URL] {
         var seen = Set<String>()
-        return urls.filter { seen.insert($0.absoluteString).inserted }
+        return urls.filter { url in
+            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            comps?.query = nil
+            return seen.insert(comps?.string ?? url.absoluteString).inserted
+        }
+    }
+
+    // MARK: Photos
+
+    /// Other photos of the same product on the page. Stores often only tag one
+    /// photo (usually a model shot) in their metadata while the gallery, flat
+    /// lays included, sits in the page's data. They share the product number
+    /// in their file names, which is how they're found here.
+    static func relatedImages(in html: String, to known: [URL], pageURL: URL) -> [URL] {
+        guard let productID = known.lazy.compactMap({ productNumber(in: $0.lastPathComponent) }).first else { return [] }
+        let unescaped = html.replacingOccurrences(of: "\\/", with: "/").replacingOccurrences(of: "\\u002F", with: "/")
+        let pattern = #"(?:https?:)?//[^"'\s<>()]+?\.(?:jpe?g|png|webp|avif)(?:\?[^"'\s<>()]*)?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
+        let ns = unescaped as NSString
+        let skip = ["chip", "swatch", "thumb", "icon", "logo", "sprite", "badge", "banner", "navi"]
+        return regex.matches(in: unescaped, range: NSRange(location: 0, length: ns.length)).compactMap { m in
+            let raw = ns.substring(with: m.range)
+            let file = raw.lowercased()
+            guard file.contains(productID), !skip.contains(where: { file.contains($0) }) else { return nil }
+            return resolve(raw, against: pageURL)
+        }
+    }
+
+    /// The longest run of five or more digits in a file name, e.g. "471809".
+    private static func productNumber(in fileName: String) -> String? {
+        let runs = fileName.split(whereSeparator: { !$0.isNumber }).filter { $0.count >= 5 }
+        return runs.max(by: { $0.count < $1.count }).map { String($0) }
+    }
+
+    /// The short codes in a link's query that can name a color, e.g. "09" in
+    /// "?colorDisplayCode=09".
+    static func colorCodes(in pageURL: URL) -> [String] {
+        (URLComponents(url: pageURL, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+            .compactMap(\.value).filter { (1...6).contains($0.count) && $0.allSatisfy { $0.isLetter || $0.isNumber } }
+            .map { $0.lowercased() }
+    }
+
+    /// Whether a photo's file name carries one of the link's color codes
+    /// ("goods_09_471809.jpg" for "?colorDisplayCode=09").
+    static func photo(_ url: URL, matchesColorIn pageURL: URL) -> Bool {
+        let codes = colorCodes(in: pageURL)
+        let tokens = url.lastPathComponent.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        return codes.contains { code in tokens.contains { $0 == code } }
+    }
+
+    /// Photos in the order worth trying: those in the link's color first.
+    static func photoOrder(_ urls: [URL], pageURL: URL) -> [URL] {
+        let matching = urls.filter { photo($0, matchesColorIn: pageURL) }
+        return matching + urls.filter { !photo($0, matchesColorIn: pageURL) }
     }
 
     static func resolve(_ string: String, against base: URL) -> URL? {
@@ -416,6 +497,8 @@ private extension ProductDetails {
         if care.isEmpty { care = other.care }
         if description.isEmpty { description = other.description }
         if breadcrumbs.isEmpty { breadcrumbs = other.breadcrumbs }
+        if silhouetteLine.isEmpty { silhouetteLine = other.silhouetteLine }
+        if fitLine.isEmpty { fitLine = other.fitLine }
         sizes += other.sizes
     }
 }

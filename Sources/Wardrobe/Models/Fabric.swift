@@ -73,7 +73,7 @@ enum Fabric: String, Codable, CaseIterable, Identifiable {
             (.suede, ["suede", "nubuck"]),
             (.pebbledLeather, ["pebbled", "pebble grain", "grained leather", "scotch grain"]),
             (.leather, ["leather", "calfskin", "patent"]),
-            (.fleece, ["fleece", "sherpa", "polar"]),
+            (.fleece, ["fleece", "sherpa", "polar", "sweatpant", "sweatshirt", "sweat ", "french terry", "terry"]),
             (.satin, ["satin", "sateen"]),
             (.silk, ["silk"]),
             (.fineKnit, ["merino", "cashmere", "knit", "sweater", "jumper", "cardigan", "crewneck", "lambswool"]),

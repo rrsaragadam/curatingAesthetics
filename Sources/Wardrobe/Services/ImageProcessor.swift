@@ -29,19 +29,102 @@ enum ImageProcessor {
     /// Longest side of the stored image, in pixels.
     static let maxStoredSide: CGFloat = 1200
 
-    static func process(imageData: Data, removeBackground: Bool) async throws -> ProcessedImage {
+    /// `crop` is a region in normalized, top-left-origin coordinates to keep
+    /// before lifting the subject, such as the garment on a model.
+    static func process(imageData: Data, removeBackground: Bool, crop: CGRect? = nil) async throws -> ProcessedImage {
         try await Task.detached(priority: .userInitiated) {
-            try processSync(imageData: imageData, removeBackground: removeBackground)
+            try processSync(imageData: imageData, removeBackground: removeBackground, crop: crop)
+        }.value
+    }
+
+    /// What a product photo shows: just the garment, or a person wearing it.
+    struct PhotoCheck: Sendable {
+        var hasPerson: Bool
+        /// Body joints in normalized, top-left-origin coordinates.
+        var joints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
+
+        /// Where a piece of `category` sits on the person, padded a little,
+        /// or nil when the pose doesn't show enough of the body to tell.
+        func garmentRegion(for category: Category) -> CGRect? {
+            func ys(_ names: [VNHumanBodyPoseObservation.JointName]) -> [CGFloat] { names.compactMap { joints[$0]?.y } }
+            func xs(_ names: [VNHumanBodyPoseObservation.JointName]) -> [CGFloat] { names.compactMap { joints[$0]?.x } }
+            let shoulders = ys([.leftShoulder, .rightShoulder, .neck])
+            let hips = ys([.leftHip, .rightHip, .root])
+            let knees = ys([.leftKnee, .rightKnee])
+            let ankles = ys([.leftAnkle, .rightAnkle])
+            let arms = xs([.leftShoulder, .rightShoulder, .leftElbow, .rightElbow, .leftWrist, .rightWrist, .leftHip, .rightHip])
+            let legs = xs([.leftHip, .rightHip, .leftKnee, .rightKnee, .leftAnkle, .rightAnkle])
+
+            var top: CGFloat, bottom: CGFloat, xRange: [CGFloat], padX: CGFloat
+            switch category {
+            case .top, .outerwear:
+                guard let s = shoulders.min(), let h = hips.max(), !arms.isEmpty else { return nil }
+                top = s - 0.05
+                bottom = h + (category == .outerwear ? 0.14 : 0.07)
+                xRange = arms; padX = 0.07
+            case .dress:
+                guard let s = shoulders.min(), let low = (ankles + knees).max(), !arms.isEmpty else { return nil }
+                top = s - 0.05; bottom = low + 0.04
+                xRange = arms + legs; padX = 0.08
+            case .bottom:
+                guard let h = hips.min(), let low = (ankles.isEmpty ? knees.map { $0 + 0.2 } : ankles).max(), !legs.isEmpty
+                else { return nil }
+                top = h - 0.03; bottom = low + 0.05
+                xRange = legs; padX = 0.1
+            case .shoes:
+                guard let a = ankles.min(), let aMax = ankles.max(), !legs.isEmpty else { return nil }
+                top = a - 0.05; bottom = aMax + 0.1
+                xRange = xs([.leftAnkle, .rightAnkle]); padX = 0.12
+            case .accessory:
+                return nil
+            }
+            guard let minX = xRange.min(), let maxX = xRange.max() else { return nil }
+            let rect = CGRect(x: minX - padX, y: top, width: maxX - minX + padX * 2, height: bottom - top)
+                .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+            return rect.width > 0.1 && rect.height > 0.08 ? rect : nil
+        }
+    }
+
+    /// Looks for a person in the photo: a face, a body, or enough body joints
+    /// (a legs-only shot of trousers still counts).
+    static func check(imageData: Data) async -> PhotoCheck? {
+        await Task.detached(priority: .userInitiated) { () -> PhotoCheck? in
+            guard let image = CIImage(data: imageData, options: [.applyOrientationProperty: true]) else { return nil }
+            let faces = VNDetectFaceRectanglesRequest()
+            let humans = VNDetectHumanRectanglesRequest()
+            humans.upperBodyOnly = false
+            let pose = VNDetectHumanBodyPoseRequest()
+            let handler = VNImageRequestHandler(ciImage: image, options: [:])
+            try? handler.perform([faces, humans, pose])
+
+            var joints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
+            if let body = pose.results?.max(by: { $0.confidence < $1.confidence }),
+               let points = try? body.recognizedPoints(.all) {
+                for (name, point) in points where point.confidence > 0.25 {
+                    joints[name] = CGPoint(x: point.location.x, y: 1 - point.location.y)
+                }
+            }
+            let hasFace = faces.results?.contains { $0.confidence > 0.6 } ?? false
+            let hasBody = humans.results?.contains { $0.confidence > 0.6 } ?? false
+            return PhotoCheck(hasPerson: hasFace || hasBody || joints.count >= 5, joints: joints)
         }.value
     }
 
     private static let ciContext = CIContext(options: [.cacheIntermediates: false])
 
-    static func processSync(imageData: Data, removeBackground: Bool) throws -> ProcessedImage {
+    static func processSync(imageData: Data, removeBackground: Bool, crop: CGRect? = nil) throws -> ProcessedImage {
         guard var image = CIImage(data: imageData, options: [.applyOrientationProperty: true]) else {
             throw Failure.unreadable
         }
         image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        if let crop {
+            // Core Image's origin is bottom-left; `crop` is top-left.
+            let e = image.extent
+            let rect = CGRect(x: crop.minX * e.width, y: (1 - crop.maxY) * e.height,
+                              width: crop.width * e.width, height: crop.height * e.height).integral
+            image = image.cropped(to: rect)
+            image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        }
 
         // Work at a sensible size; huge camera photos slow Vision down for no gain.
         let workingSide: CGFloat = 2048

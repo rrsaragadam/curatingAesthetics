@@ -20,7 +20,7 @@ struct AddFromLinkSheet: View {
 
     private static let steps = [
         "Reading the product page",
-        "Downloading the photo",
+        "Finding a photo of just the piece",
         "Removing the background",
         "Pulling size, material and care",
     ]
@@ -32,6 +32,9 @@ struct AddFromLinkSheet: View {
     @State private var png: Data?
     @State private var previewImage: NSImage?
     @State private var backgroundRemoved = false
+    @State private var photos: [PagePhoto] = []
+    @State private var chosenPhoto: UUID?
+    @State private var photoTask: Task<Void, Never>?
     @State private var brandLine = ""
     @State private var task: Task<Void, Never>?
     @FocusState private var linkFocused: Bool
@@ -80,6 +83,8 @@ struct AddFromLinkSheet: View {
             }
             .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : 8)))
 
+            Spacer(minLength: 0)
+
             HStack {
                 Spacer()
                 Button("Cancel") { task?.cancel(); dismiss() }
@@ -94,17 +99,40 @@ struct AddFromLinkSheet: View {
             }
         }
         .padding(26)
-        .frame(width: 640)
+        // The sheet window keeps the size it opens at, so it opens tall enough
+        // for the preview rather than growing into it.
+        .frame(width: 640, height: 580, alignment: .top)
         .background(Theme.panel)
         .animation(Motion.respecting(reduceMotion, Motion.settle), value: phase)
         .onAppear {
+            if let given = nav.linkToAdd {
+                nav.linkToAdd = nil
+                link = given
+                fetch()
+                return
+            }
             if let s = NSPasteboard.general.string(forType: .string), ProductImporter.normalizedURL(from: s) != nil,
                s.lowercased().hasPrefix("http") {
                 link = s.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             linkFocused = true
         }
-        .onDisappear { task?.cancel() }
+        .onDisappear { task?.cancel(); photoTask?.cancel() }
+    }
+
+    /// One photo from the product page, checked for a person wearing it.
+    private struct PagePhoto: Identifiable {
+        let id = UUID()
+        let data: Data
+        let thumbnail: NSImage
+        let check: ImageProcessor.PhotoCheck
+        /// Shows the color picked in the link, judging by its file name.
+        let inLinkColor: Bool
+
+        /// Where to crop for `category` when a model is wearing the piece.
+        func crop(for category: Category) -> CGRect? {
+            check.hasPerson ? check.garmentRegion(for: category) : nil
+        }
     }
 
     private var isLoading: Bool {
@@ -190,7 +218,8 @@ struct AddFromLinkSheet: View {
                 .padding(20)
                 .shadow(color: .black.opacity(0.16), radius: 10, y: 8)
                 if backgroundRemoved {
-                    Label("Background removed", systemImage: "wand.and.stars")
+                    Label(chosenHasPerson ? "Cropped to the piece" : "Background removed",
+                          systemImage: chosenHasPerson ? "person.crop.rectangle" : "wand.and.stars")
                         .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -200,6 +229,15 @@ struct AddFromLinkSheet: View {
                 }
             }
             .frame(width: 200, height: 220)
+            .overlay {
+                if photoTask != nil {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if photos.count > 1 { photoStrip.offset(y: 46) }
+            }
+            .padding(.bottom, photos.count > 1 ? 46 : 0)
 
             VStack(alignment: .leading, spacing: 10) {
                 if !brandLine.isEmpty {
@@ -217,6 +255,14 @@ struct AddFromLinkSheet: View {
                         FabricSwatch(hex: draft.colorHex, fabric: draft.fabric, size: 14)
                         Picker("Texture", selection: $draft.fabric) {
                             ForEach(Fabric.allCases) { Text($0.label).tag($0) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    HStack(spacing: 10) {
+                        Text("Silhouette").foregroundStyle(Theme.inkTertiary).frame(width: 72, alignment: .leading)
+                        Picker("Silhouette", selection: $draft.silhouette) {
+                            ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
                         }
                         .labelsHidden()
                         .fixedSize()
@@ -259,6 +305,75 @@ struct AddFromLinkSheet: View {
         }
     }
 
+    private var chosenHasPerson: Bool {
+        photos.first { $0.id == chosenPhoto }?.check.hasPerson ?? false
+    }
+
+    /// The other photos on the page, to pick a better one than the guess.
+    private var photoStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(photos) { photo in
+                    Button { choose(photo) } label: {
+                        Image(nsImage: photo.thumbnail)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 30, height: 38)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(chosenPhoto == photo.id ? Theme.green : Theme.line,
+                                                  lineWidth: chosenPhoto == photo.id ? 2 : 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(photo.check.hasPerson ? "Model photo: Wardrobe crops to the piece" : "Product photo")
+                    .accessibilityLabel(photo.check.hasPerson ? "Model photo" : "Product photo")
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .frame(width: 200, height: 42)
+    }
+
+    private func choose(_ photo: PagePhoto) {
+        guard chosenPhoto != photo.id else { return }
+        chosenPhoto = photo.id
+        photoTask?.cancel()
+        photoTask = Task { @MainActor in
+            let processed = try? await ImageProcessor.process(imageData: photo.data, removeBackground: removeBackground,
+                                                              crop: photo.crop(for: draft.category))
+            guard !Task.isCancelled else { return }
+            if let processed { apply(processed) }
+            photoTask = nil
+        }
+    }
+
+    private func apply(_ processed: ProcessedImage) {
+        png = processed.png
+        previewImage = NSImage(data: processed.png)
+        backgroundRemoved = processed.backgroundRemoved
+        if let color = processed.dominantColor {
+            draft.colorHex = color.hex
+        }
+    }
+
+    /// Downloads the page's photos (the color in the link first) and checks
+    /// each for a person, stopping at the first that shows just the piece.
+    private func gatherPhotos(_ details: ProductDetails, from url: URL) async -> [PagePhoto] {
+        var found: [PagePhoto] = []
+        for candidate in ProductImporter.photoOrder(details.imageURLs, pageURL: url).prefix(10) {
+            if Task.isCancelled { break }
+            guard let data = try? await ProductImporter.downloadImage(candidate, referer: url),
+                  let image = NSImage(data: data),
+                  let check = await ImageProcessor.check(imageData: data) else { continue }
+            found.append(PagePhoto(data: data, thumbnail: image, check: check,
+                                   inLinkColor: ProductImporter.photo(candidate, matchesColorIn: url)))
+            if !check.hasPerson && found.count >= 4 { break }
+        }
+        return found
+    }
+
     // MARK: Actions
 
     private func fetch() {
@@ -279,19 +394,24 @@ struct AddFromLinkSheet: View {
             try Task.checkCancellation()
 
             setStep(1)
-            var imageData: Data?
-            for candidate in details.imageURLs.prefix(3) {
-                if let data = try? await ProductImporter.downloadImage(candidate, referer: url), NSImage(data: data) != nil {
-                    imageData = data
-                    break
-                }
-            }
+            let pagePhotos = await gatherPhotos(details, from: url)
+            // A photo of just the piece beats a model shot, as long as it shows
+            // the color in the link (a flat lay of every color doesn't). Failing
+            // that, crop the model photo to where the piece sits.
+            let category = details.categoryGuess ?? .top
+            let hasColor = !ProductImporter.colorCodes(in: url).isEmpty
+            let best = pagePhotos.first { !$0.check.hasPerson && ($0.inLinkColor || !hasColor) }
+                ?? pagePhotos.first { $0.inLinkColor && $0.crop(for: category) != nil }
+                ?? pagePhotos.first { !$0.check.hasPerson }
+                ?? pagePhotos.first { $0.crop(for: category) != nil }
+                ?? pagePhotos.first
             try Task.checkCancellation()
 
             setStep(2)
             var processed: ProcessedImage?
-            if let imageData {
-                processed = try? await ImageProcessor.process(imageData: imageData, removeBackground: removeBackground)
+            if let best {
+                processed = try? await ImageProcessor.process(imageData: best.data, removeBackground: removeBackground,
+                                                              crop: best.crop(for: category))
             }
             try Task.checkCancellation()
 
@@ -302,6 +422,7 @@ struct AddFromLinkSheet: View {
             item.material = details.material
             item.care = details.care
             item.fabric = details.fabricGuess ?? .unknown
+            item.silhouette = details.silhouetteGuess ?? .unknown
             item.sourceURL = url.absoluteString
             if !details.colorWord.isEmpty {
                 item.colorName = details.colorWord.split(separator: "/").first.map {
@@ -321,6 +442,8 @@ struct AddFromLinkSheet: View {
             png = processed?.png
             previewImage = processed.flatMap { NSImage(data: $0.png) }
             backgroundRemoved = processed?.backgroundRemoved ?? false
+            photos = pagePhotos
+            chosenPhoto = best?.id
             brandLine = [details.brand, details.host].filter { !$0.isEmpty }.joined(separator: " · ")
             // Let the last check land before revealing the preview.
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 350))
@@ -343,3 +466,4 @@ struct AddFromLinkSheet: View {
         dismiss()
     }
 }
+

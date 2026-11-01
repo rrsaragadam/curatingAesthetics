@@ -47,6 +47,9 @@ struct ItemEditorSheet: View {
                     Picker("Texture", selection: $draft.fabric) {
                         ForEach(Fabric.allCases) { Text($0.label).tag($0) }
                     }
+                    Picker("Silhouette", selection: $draft.silhouette) {
+                        ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
+                    }
                     TextField("Material", text: $draft.material, prompt: Text("e.g. 100% merino wool"))
                     TextField("Size", text: $draft.size)
                     TextField("Care", text: $draft.care, prompt: Text("e.g. Hand wash cold, lay flat"))
