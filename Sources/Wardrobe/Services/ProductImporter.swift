@@ -416,7 +416,7 @@ enum ProductImporter {
         let pattern = #"(?:https?:)?//[^"'\s<>()]+?\.(?:jpe?g|png|webp|avif)(?:\?[^"'\s<>()]*)?"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
         let ns = unescaped as NSString
-        let skip = ["chip", "swatch", "thumb", "icon", "logo", "sprite", "badge", "banner", "navi"]
+        let skip = ["chip", "swatch", "thumb", "icon", "logo", "sprite", "badge", "banner", "navi", "feature"]
         return regex.matches(in: unescaped, range: NSRange(location: 0, length: ns.length)).compactMap { m in
             let raw = ns.substring(with: m.range)
             let file = raw.lowercased()
@@ -447,10 +447,32 @@ enum ProductImporter {
         return codes.contains { code in tokens.contains { $0 == code } }
     }
 
-    /// Photos in the order worth trying: those in the link's color first.
+    /// Photos in the order worth trying: those in the link's color first, then
+    /// photos that don't name a color. A photo named like one in the link's
+    /// color but with another code in that spot ("goods_19_471809.jpg" next to
+    /// "cagoods_09_471809.jpg") shows another color, so it's left out.
     static func photoOrder(_ urls: [URL], pageURL: URL) -> [URL] {
+        let codes = colorCodes(in: pageURL)
+        func tokens(_ url: URL) -> [String] {
+            url.lastPathComponent.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
         let matching = urls.filter { photo($0, matchesColorIn: pageURL) }
-        return matching + urls.filter { !photo($0, matchesColorIn: pageURL) }
+        // Each photo in the link's color, with the position of its color code.
+        let templates: [(tokens: [String], at: Int)] = matching.compactMap { url in
+            let t = tokens(url)
+            return t.firstIndex(where: { codes.contains($0) }).map { (t, $0) }
+        }
+        func isOtherColor(_ url: URL) -> Bool {
+            let t = tokens(url)
+            return templates.contains { template in
+                guard t.count == template.tokens.count, t[template.at] != template.tokens[template.at],
+                      t[template.at].count == template.tokens[template.at].count else { return false }
+                let otherDifferences = zip(t, template.tokens).enumerated()
+                    .filter { $0.offset != template.at && $0.element.0 != $0.element.1 }.count
+                return otherDifferences <= 1
+            }
+        }
+        return matching + urls.filter { !photo($0, matchesColorIn: pageURL) && !isOtherColor($0) }
     }
 
     static func resolve(_ string: String, against base: URL) -> URL? {

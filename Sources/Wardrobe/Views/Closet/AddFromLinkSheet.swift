@@ -360,18 +360,43 @@ struct AddFromLinkSheet: View {
 
     /// Downloads the page's photos (the color in the link first) and checks
     /// each for a person, stopping at the first that shows just the piece.
-    private func gatherPhotos(_ details: ProductDetails, from url: URL) async -> [PagePhoto] {
+    private func gatherPhotos(_ details: ProductDetails, category: Category, from url: URL) async -> [PagePhoto] {
         var found: [PagePhoto] = []
-        for candidate in ProductImporter.photoOrder(details.imageURLs, pageURL: url).prefix(10) {
+        for candidate in ProductImporter.photoOrder(details.imageURLs, pageURL: url).prefix(14) {
             if Task.isCancelled { break }
             guard let data = try? await ProductImporter.downloadImage(candidate, referer: url),
                   let image = NSImage(data: data),
-                  let check = await ImageProcessor.check(imageData: data) else { continue }
+                  let check = await ImageProcessor.check(imageData: data, category: category) else { continue }
             found.append(PagePhoto(data: data, thumbnail: image, check: check,
                                    inLinkColor: ProductImporter.photo(candidate, matchesColorIn: url)))
-            if !check.hasPerson && found.count >= 4 { break }
         }
         return found
+    }
+
+    /// The piece's color in the link: as worn in its model photos, or the
+    /// page's color word.
+    private func referenceColor(in photos: [PagePhoto], colorWord: String) -> RGB? {
+        photos.first(where: \.inLinkColor)?.check.pieceColor
+            ?? ColorNamer.hex(forColorWord: colorWord).flatMap { RGB(hex: $0) }
+    }
+
+    /// The photo to start with. A shot of just the piece beats a model photo
+    /// when it's in the link's color: named for it, or matching the piece's
+    /// color in the link's model photos (or the page's color word). Failing
+    /// that, the model photo in the link's color, cropped to the piece.
+    private func bestPhoto(in photos: [PagePhoto], category: Category, reference: RGB?, url: URL) -> PagePhoto? {
+        let hasColor = !ProductImporter.colorCodes(in: url).isEmpty || reference != nil
+        func rightColor(_ photo: PagePhoto) -> Bool {
+            if photo.inLinkColor { return true }
+            guard let reference, let color = photo.check.pieceColor else { return !hasColor }
+            return color.distance(to: reference) < 22
+        }
+        let products = photos.filter(\.check.isProductShot)
+        return products.first(where: rightColor)
+            ?? photos.first { $0.inLinkColor && $0.crop(for: category) != nil }
+            ?? products.first
+            ?? photos.first { $0.crop(for: category) != nil }
+            ?? photos.first
     }
 
     // MARK: Actions
@@ -394,17 +419,18 @@ struct AddFromLinkSheet: View {
             try Task.checkCancellation()
 
             setStep(1)
-            let pagePhotos = await gatherPhotos(details, from: url)
-            // A photo of just the piece beats a model shot, as long as it shows
-            // the color in the link (a flat lay of every color doesn't). Failing
-            // that, crop the model photo to where the piece sits.
             let category = details.categoryGuess ?? .top
-            let hasColor = !ProductImporter.colorCodes(in: url).isEmpty
-            let best = pagePhotos.first { !$0.check.hasPerson && ($0.inLinkColor || !hasColor) }
-                ?? pagePhotos.first { $0.inLinkColor && $0.crop(for: category) != nil }
-                ?? pagePhotos.first { !$0.check.hasPerson }
-                ?? pagePhotos.first { $0.crop(for: category) != nil }
-                ?? pagePhotos.first
+            var pagePhotos = await gatherPhotos(details, category: category, from: url)
+            let reference = referenceColor(in: pagePhotos, colorWord: details.colorWord)
+            // Photos clearly showing another color (a model in the beige pair
+            // when the link is for black) aren't worth offering.
+            if let reference {
+                pagePhotos.removeAll { photo in
+                    guard !photo.inLinkColor, let color = photo.check.pieceColor else { return false }
+                    return color.distance(to: reference) > 40
+                }
+            }
+            let best = bestPhoto(in: pagePhotos, category: category, reference: reference, url: url)
             try Task.checkCancellation()
 
             setStep(2)
