@@ -12,8 +12,10 @@ struct RootView: View {
         @Bindable var nav = nav
         NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 224, max: 260)
                 .toolbar(removing: .sidebarToggle)
+                // Must come after `.toolbar(removing:)`, or the width is ignored and
+                // the sidebar falls back to a narrow default.
+                .navigationSplitViewColumnWidth(min: 210, ideal: 224, max: 260)
         } detail: {
             Group {
                 switch nav.section {
@@ -22,7 +24,9 @@ struct RootView: View {
                 case .lookbook: LookbookView()
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // minHeight 0 keeps a tall page from making the column taller than
+            // the window, which pushes every screen's top under the title bar.
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
             .background(Theme.ground)
             .foregroundStyle(Theme.ink)
         }

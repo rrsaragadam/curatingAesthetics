@@ -89,8 +89,12 @@ struct BuilderView: View {
                                 OutfitStage(pieces: stagePieces)
                                 matchNote
                             }
-                            .frame(width: 350)
+                            // The stage gives up width first so the slot rows keep
+                            // room for their labels on smaller windows.
+                            .frame(minWidth: 220, maxWidth: 350)
                             slotList
+                                .frame(minWidth: 330)
+                                .layoutPriority(1)
                         }
                     }
                     .padding(30)
@@ -419,6 +423,7 @@ private struct SlotRow: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.inkSecondary)
                     .monospacedDigit()
+                    .lineLimit(1)
                 Text(item?.name ?? "None")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(item == nil ? Theme.inkTertiary : Theme.ink)

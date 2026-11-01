@@ -62,8 +62,8 @@ struct ItemDetailPanel: View {
             .padding(.vertical, 16)
             .overlay(alignment: .top) { Divider().overlay(Theme.line) }
         }
-        .background(Theme.panel)
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1) }
+        .background(Theme.panel.ignoresSafeArea())
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
 
     private var hero: some View {

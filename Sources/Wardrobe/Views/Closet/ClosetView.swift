@@ -74,6 +74,8 @@ struct ClosetView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(nav.collection == .all ? "Closet" : nav.collection.label)
                     .font(.wardrobeTitle)
+                    .lineLimit(1)
+                    .fixedSize()
                     .contentTransition(.opacity)
                 Text(countLabel)
                     .font(.system(size: 13))

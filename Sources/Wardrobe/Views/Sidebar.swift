@@ -40,7 +40,7 @@ struct Sidebar: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.forest.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
     }

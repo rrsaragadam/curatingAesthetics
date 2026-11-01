@@ -90,8 +90,8 @@ struct ThisLookPanel: View {
         .padding(22)
         .padding(.top, 26)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.panel)
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1) }
+        .background(Theme.panel.ignoresSafeArea())
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
 
     private func note(_ title: String, _ body: String) -> some View {

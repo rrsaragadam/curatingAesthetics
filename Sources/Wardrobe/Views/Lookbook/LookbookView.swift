@@ -210,6 +210,8 @@ private struct LookCard: View {
                 HStack(spacing: 8) {
                     Text(outfit.occasion.label)
                         .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Theme.greenTonal, in: Capsule())
@@ -223,6 +225,8 @@ private struct LookCard: View {
                     if outfit.wasWorn(on: .now) {
                         Label("Today's look", systemImage: "sun.max.fill")
                             .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize()
                             .foregroundStyle(Theme.green)
                             .transition(.scale.combined(with: .opacity))
                     } else {
@@ -230,6 +234,8 @@ private struct LookCard: View {
                             withAnimation(.spring(response: 0.42, dampingFraction: 0.6)) { store.markWorn(outfit) }
                         } label: {
                             Label("Worn today", systemImage: "sun.max")
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                         .buttonStyle(WardrobeButtonStyle(kind: .quiet, compact: true))
                         .transition(.scale.combined(with: .opacity))

@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct WardrobeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var store = WardrobeStore()
+    @State private var store = WardrobeStore(rootURL: SnapshotMode.storeURL)
     @State private var nav = AppNavigation()
 
     init() {
@@ -18,6 +18,7 @@ struct WardrobeApp: App {
                 .environment(nav)
                 .frame(minWidth: 1080, minHeight: 680)
                 .tint(Theme.green)
+                .task { SnapshotMode.run(store: store, nav: nav) }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 860)
