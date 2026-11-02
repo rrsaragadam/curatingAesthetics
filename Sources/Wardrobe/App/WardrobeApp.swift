@@ -18,7 +18,18 @@ struct WardrobeApp: App {
                 .environment(nav)
                 .frame(minWidth: 1080, minHeight: 680)
                 .tint(Theme.green)
-                .task { SnapshotMode.run(store: store, nav: nav) }
+                .task {
+                    await StylistVision.shared.configure(
+                        imagesURL: store.imagesURL, cacheURL: store.rootURL.appendingPathComponent("stylist-photos.json"))
+                    SnapshotMode.run(store: store, nav: nav)
+                    StylistBench.run()
+                    // Describe new photos in the background, so the stylist
+                    // doesn't wait on them later.
+                    if !StylistBench.isActive {
+                        let items = store.items
+                        Task.detached(priority: .utility) { await StylistVision.shared.warm(items) }
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 860)
@@ -80,9 +91,17 @@ final class AppNavigation {
     var pieceToStyle: UUID?
     /// Set from the lookbook to reopen an outfit in the builder.
     var outfitToEdit: UUID?
+    /// Set by the sidebar's stylist card; the builder asks for a look and clears this.
+    var stylistRequest: UUID?
+    var showStylistGaps = false
 
     func style(_ item: ClothingItem) {
         pieceToStyle = item.id
+        section = .builder
+    }
+
+    func askStylist() {
+        stylistRequest = UUID()
         section = .builder
     }
 

@@ -10,6 +10,8 @@ import Observation
 final class WardrobeStore {
     private(set) var items: [ClothingItem] = []
     private(set) var outfits: [Outfit] = []
+    /// What the stylist has learned from suggestions you turned down.
+    private(set) var taste = StylistTaste()
     var lastError: String?
 
     let rootURL: URL
@@ -37,6 +39,7 @@ final class WardrobeStore {
             let decoded = try decoder.decode(WardrobeData.self, from: data)
             items = decoded.items
             outfits = decoded.outfits
+            taste = decoded.taste
         } catch {
             // Keep a copy so a bad file is never silently overwritten.
             let backup = rootURL.appendingPathComponent("wardrobe-unreadable-\(Int(Date().timeIntervalSince1970)).json")
@@ -50,7 +53,7 @@ final class WardrobeStore {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
-            let data = try encoder.encode(WardrobeData(items: items, outfits: outfits))
+            let data = try encoder.encode(WardrobeData(items: items, outfits: outfits, taste: taste))
             try data.write(to: dataURL, options: .atomic)
         } catch {
             lastError = "Couldn't save: \(error.localizedDescription)"
@@ -212,6 +215,24 @@ final class WardrobeStore {
     }
 
     @discardableResult
+    // MARK: Stylist taste
+
+    func decline(_ gap: StylistGap, because reason: DeclineReason) {
+        taste.pieces.append(.init(name: gap.name, category: gap.category, colorName: ColorNamer.name(forHex: gap.colorHex),
+                                  fabric: gap.fabric, reason: reason))
+        save()
+    }
+
+    func decline(look itemIDs: [UUID], because reason: DeclineReason) {
+        taste.looks.append(.init(itemIDs: itemIDs, reason: reason))
+        save()
+    }
+
+    func resetTaste() {
+        taste = StylistTaste()
+        save()
+    }
+
     func saveOutfit(name: String, itemIDs: [UUID], occasion: Occasion) -> Outfit {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let outfit = Outfit(name: trimmed.isEmpty ? "Look \(outfits.count + 1)" : trimmed,

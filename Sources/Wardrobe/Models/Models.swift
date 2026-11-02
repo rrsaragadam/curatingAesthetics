@@ -249,10 +249,12 @@ struct WardrobeData: Codable {
     var version: Int = 1
     var items: [ClothingItem] = []
     var outfits: [Outfit] = []
+    var taste = StylistTaste()
 
-    init(items: [ClothingItem] = [], outfits: [Outfit] = []) {
+    init(items: [ClothingItem] = [], outfits: [Outfit] = [], taste: StylistTaste = StylistTaste()) {
         self.items = items
         self.outfits = outfits
+        self.taste = taste
     }
 
     init(from decoder: Decoder) throws {
@@ -260,6 +262,7 @@ struct WardrobeData: Codable {
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         items = try c.decodeIfPresent([ClothingItem].self, forKey: .items) ?? []
         outfits = try c.decodeIfPresent([Outfit].self, forKey: .outfits) ?? []
+        taste = (try? c.decodeIfPresent(StylistTaste.self, forKey: .taste)) ?? StylistTaste()
     }
 }
 

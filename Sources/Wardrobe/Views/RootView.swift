@@ -37,6 +37,9 @@ struct RootView: View {
         .sheet(isPresented: $nav.showAddFromLink) {
             AddFromLinkSheet()
         }
+        .sheet(isPresented: $nav.showStylistGaps) {
+            StylistGapsSheet()
+        }
         .alert("Something went wrong", isPresented: Binding(
             get: { store.lastError != nil },
             set: { if !$0 { store.lastError = nil } }
