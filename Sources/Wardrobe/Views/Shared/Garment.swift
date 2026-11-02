@@ -86,6 +86,7 @@ enum GarmentOutline {
         switch category {
         case .top: return "M30 18 L42 12 Q50 20 58 12 L70 18 L82 34 L71 40 L68 35 L68 88 L32 88 L32 35 L29 40 L18 34 Z"
         case .bottom: return "M33 10 L67 10 L71 90 L56 90 L50 38 L44 90 L29 90 Z"
+        case .jacket: return "M30 16 L43 12 L50 30 L57 12 L70 16 L84 72 L74 75 L68 42 L68 80 L32 80 L32 42 L26 75 L16 72 Z"
         case .outerwear: return "M30 14 L43 10 L50 30 L57 10 L70 14 L86 78 L75 81 L68 42 L68 90 L32 90 L32 42 L25 81 L14 78 Z"
         case .shoes: return "M12 66 L12 46 Q28 50 38 40 L52 56 Q70 59 87 63 Q90 72 85 75 L14 75 Z"
         case .accessory: return "M26 42 L74 42 L78 86 L22 86 Z M38 42 Q38 22 50 22 Q62 22 62 42 L58 42 Q58 27 50 27 Q42 27 42 42 Z"
@@ -97,6 +98,7 @@ enum GarmentOutline {
         switch category {
         case .top: return "M42 12 Q50 24 58 12 M32 36 Q35 27 30 18 M68 36 Q65 27 70 18 M33 83 L67 83"
         case .bottom: return "M33 17 L67 17 M50 17 L50 34 M36 17 Q37 25 44 25 M64 17 Q63 25 56 25 M31 84 L43 84 M57 84 L69 84"
+        case .jacket: return "M43 12 L46 30 L50 30 M57 12 L54 30 L50 30 M50 30 L50 80 M36 56 L45 56 M55 56 L64 56 M32 74 L68 74"
         case .outerwear: return "M43 10 L45 38 L50 30 M57 10 L55 38 L50 30 M50 30 L50 90 M36 64 L45 64 M55 64 L64 64 M27 74 L24 76 M73 74 L76 76"
         case .shoes: return "M12 70 L86 70 M14 50 Q24 53 33 45 M38 46 L43 51 M42 43 L47 49 M46 47 L51 53"
         case .accessory: return "M24 52 L76 52 M48 52 L48 58 L52 58 L52 52"

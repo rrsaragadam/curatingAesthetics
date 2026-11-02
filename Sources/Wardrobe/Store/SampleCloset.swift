@@ -12,10 +12,12 @@ enum SampleCloset {
                    fabric: Fabric, material: String, size: String, seasons: Set<Season>,
                    formality: Formality, worn: Int, lastWorn: Double, favorite: Bool = false,
                    care: String = "") -> ClothingItem {
-            ClothingItem(name: name, category: category, colorHex: hex, colorName: colorName,
-                         seasons: seasons, formality: formality, fabric: fabric, material: material,
-                         size: size, care: care, tags: [tag], favorite: favorite, imageFile: nil,
-                         addedAt: daysAgo(200), timesWorn: worn, lastWornAt: daysAgo(lastWorn))
+            var item = ClothingItem(name: name, category: category, colorHex: hex, colorName: colorName,
+                                    seasons: seasons, formality: formality, fabric: fabric, material: material,
+                                    size: size, care: care, tags: [tag], favorite: favorite, imageFile: nil,
+                                    addedAt: daysAgo(200), timesWorn: worn, lastWornAt: daysAgo(lastWorn))
+            if category == .shoes { item.shoeType = ShoeType.guess(from: name) ?? .unknown }
+            return item
         }
 
         let oxford = piece("Oxford shirt", .top, "#DCE6F2", "Pale blue", fabric: .oxford, material: "100% cotton",
@@ -32,7 +34,7 @@ enum SampleCloset {
                           size: "32 × 32", seasons: [], formality: .casual, worn: 40, lastWorn: 1, favorite: true)
         let trousers = piece("Pleated trousers", .bottom, "#B8A88A", "Stone", fabric: .twill, material: "Wool blend",
                              size: "32", seasons: [.spring, .fall], formality: .business, worn: 6, lastWorn: 74)
-        let chore = piece("Chore jacket", .outerwear, "#8A5A35", "Tobacco", fabric: .canvas, material: "Cotton canvas",
+        let chore = piece("Chore jacket", .jacket, "#8A5A35", "Tobacco", fabric: .canvas, material: "Cotton canvas",
                           size: "M", seasons: [.spring, .fall], formality: .casual, worn: 12, lastWorn: 2, favorite: true)
         let overcoat = piece("Wool overcoat", .outerwear, "#2E2C2A", "Charcoal", fabric: .melton,
                              material: "80% wool, 20% cashmere", size: "40R", seasons: [.winter], formality: .business,

@@ -7,7 +7,7 @@ enum BuilderSlot: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .outerwear: return "Outerwear"
+        case .outerwear: return "Jacket or coat"
         case .top: return "Top"
         case .bottom: return "Bottom"
         case .shoes: return "Shoes"
@@ -19,7 +19,7 @@ enum BuilderSlot: String, CaseIterable, Identifiable {
 
     static func slot(for category: Category) -> BuilderSlot {
         switch category {
-        case .outerwear: return .outerwear
+        case .jacket, .outerwear: return .outerwear
         case .top, .dress: return .top
         case .bottom: return .bottom
         case .shoes: return .shoes
@@ -181,7 +181,7 @@ struct BuilderView: View {
                             onPrevious: { step(slot, by: -1) },
                             onNext: { step(slot, by: 1) })
                 }
-                Text("Pieces from your closet appear in their slot automatically. Accessories and outerwear can be left off.")
+                Text("Pieces from your closet appear in their slot automatically. Accessories, jackets and coats can be left off.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.inkTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

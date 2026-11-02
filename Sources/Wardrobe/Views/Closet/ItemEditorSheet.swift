@@ -47,8 +47,14 @@ struct ItemEditorSheet: View {
                     Picker("Texture", selection: $draft.fabric) {
                         ForEach(Fabric.allCases) { Text($0.label).tag($0) }
                     }
-                    Picker("Silhouette", selection: $draft.silhouette) {
-                        ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
+                    if draft.category == .shoes {
+                        Picker("Type", selection: $draft.shoeType) {
+                            ForEach(ShoeType.allCases) { Text($0.label).tag($0) }
+                        }
+                    } else {
+                        Picker("Silhouette", selection: $draft.silhouette) {
+                            ForEach(Silhouette.allCases) { Text($0.label).tag($0) }
+                        }
                     }
                     TextField("Material", text: $draft.material, prompt: Text("e.g. 100% merino wool"))
                     TextField("Size", text: $draft.size)

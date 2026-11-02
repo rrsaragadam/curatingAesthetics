@@ -25,15 +25,17 @@ struct ProductDetails: Equatable {
         Fabric.guess(from: name) ?? Fabric.guess(from: material) ?? Fabric.guess(from: description)
     }
 
-    /// The title names the cut most directly ("Wide Pants"), then the store's own
-    /// silhouette and fit labels, then the description.
+    /// The store's own silhouette comes first, then the title ("Wide Pants"),
+    /// the store's fit label, and the description.
     var silhouetteGuess: Silhouette? {
-        Silhouette.guess(from: name) ?? Silhouette.guess(from: silhouetteLine, labeled: true)
+        Silhouette.guess(from: silhouetteLine, labeled: true) ?? Silhouette.guess(from: name)
             ?? Silhouette.guess(from: fitLine, labeled: true) ?? Silhouette.guess(from: description)
     }
 
-    var host: String {
-        let h = sourceURL.host() ?? sourceURL.absoluteString
+    var host: String { Self.host(of: sourceURL) }
+
+    static func host(of url: URL) -> String {
+        let h = url.host() ?? url.absoluteString
         return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
     }
 
@@ -58,6 +60,25 @@ enum ProductImporter {
     }
 
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+
+    /// A name from the link alone, for stores that won't share their page:
+    /// ".../samba-og-shoes/B75806.html" becomes "Samba OG Shoes".
+    static func name(fromLink url: URL) -> String {
+        let parts = url.pathComponents.reversed().map { ($0 as NSString).deletingPathExtension }
+        // Skip product codes such as "B75806"; take the first part that reads as words.
+        let words = parts.first { part in
+            let tokens = part.split(whereSeparator: { $0 == "-" || $0 == "_" })
+            return tokens.count >= 2 && tokens.filter { $0.allSatisfy(\.isLetter) }.count >= 2
+        } ?? ""
+        return words.split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .map { $0.count <= 2 ? $0.uppercased() : $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    /// "adidas.ca" becomes "adidas".
+    static func brand(fromHost host: String) -> String {
+        host.split(separator: ".").first.map(String.init) ?? ""
+    }
 
     static func normalizedURL(from text: String) -> URL? {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -169,7 +190,13 @@ enum ProductImporter {
         let text = plainText(fromHTML: html)
         if d.material.isEmpty { d.material = findComposition(in: text) ?? "" }
         if d.care.isEmpty { d.care = findCare(in: text) ?? "" }
+        // A store's silhouette filter value (Uniqlo: "groupName":"Silhouette" … "tagName":"Barrel")
+        // is kept more carefully than its prose, so it wins.
+        if let tagged = silhouetteTag(in: html) { d.silhouetteLine = tagged }
         if d.silhouetteLine.isEmpty { d.silhouetteLine = findLabeled("silhouette", in: text) ?? "" }
+        // The color picked in the link beats the page's default color.
+        if let picked = colorName(forCodesIn: pageURL, html: html) { d.colorWord = picked }
+        if d.colorWord.isEmpty, let shown = findLabeled("colou?r", in: text) { d.colorWord = cleanColorWord(shown) }
         if d.fitLine.isEmpty { d.fitLine = findLabeled("fit", in: text) ?? "" }
 
         d.name = cleanTitle(d.name, brand: d.brand, host: d.host)
@@ -351,6 +378,36 @@ enum ProductImporter {
         return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
     }
 
+    /// The silhouette a store tags the product with in its page data.
+    static func silhouetteTag(in html: String) -> String? {
+        let pattern = #"(?i)"(?:groupName|name|label|attribute)"\s*:\s*"silhouette"[^{}]{0,80}?"(?:tagName|value|displayValue)"\s*:\s*"([^"]{2,24})""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = html as NSString
+        guard let m = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: m.range(at: 1))
+    }
+
+    /// The name a store gives the color code in the link, from its page data:
+    /// `"displayCode":"66","name":"BLUE"` for "?colorDisplayCode=66".
+    static func colorName(forCodesIn pageURL: URL, html: String) -> String? {
+        for code in colorCodes(in: pageURL) {
+            let escaped = NSRegularExpression.escapedPattern(for: code)
+            let pattern = #"(?i)"[a-z]*code"\s*:\s*"(?:col)?"# + escaped + #""\s*,\s*"name"\s*:\s*"([^"]{2,30})""#
+            if let r = html.range(of: pattern, options: .regularExpression),
+               let name = String(html[r]).components(separatedBy: "\"").dropLast().last {
+                return cleanColorWord(name)
+            }
+        }
+        return nil
+    }
+
+    /// "66 BLUE" becomes "Blue", "NAVY" becomes "Navy".
+    static func cleanColorWord(_ word: String) -> String {
+        let trimmed = word.replacingOccurrences(of: #"^\d+\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return trimmed.lowercased().split(separator: " ").map { $0.capitalized }.joined(separator: " ")
+    }
+
     static func findCare(in text: String) -> String? {
         let pattern = "(?i)(machine wash|hand wash|dry clean|wash cold|cold wash|do not wash|spot clean|wash at \\d+)[^.;|]{0,70}"
         guard let r = text.range(of: pattern, options: .regularExpression) else { return nil }
@@ -416,7 +473,7 @@ enum ProductImporter {
         let pattern = #"(?:https?:)?//[^"'\s<>()]+?\.(?:jpe?g|png|webp|avif)(?:\?[^"'\s<>()]*)?"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
         let ns = unescaped as NSString
-        let skip = ["chip", "swatch", "thumb", "icon", "logo", "sprite", "badge", "banner", "navi"]
+        let skip = ["chip", "swatch", "thumb", "icon", "logo", "sprite", "badge", "banner", "navi", "feature"]
         return regex.matches(in: unescaped, range: NSRange(location: 0, length: ns.length)).compactMap { m in
             let raw = ns.substring(with: m.range)
             let file = raw.lowercased()
@@ -447,10 +504,32 @@ enum ProductImporter {
         return codes.contains { code in tokens.contains { $0 == code } }
     }
 
-    /// Photos in the order worth trying: those in the link's color first.
+    /// Photos in the order worth trying: those in the link's color first, then
+    /// photos that don't name a color. A photo named like one in the link's
+    /// color but with another code in that spot ("goods_19_471809.jpg" next to
+    /// "cagoods_09_471809.jpg") shows another color, so it's left out.
     static func photoOrder(_ urls: [URL], pageURL: URL) -> [URL] {
+        let codes = colorCodes(in: pageURL)
+        func tokens(_ url: URL) -> [String] {
+            url.lastPathComponent.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
         let matching = urls.filter { photo($0, matchesColorIn: pageURL) }
-        return matching + urls.filter { !photo($0, matchesColorIn: pageURL) }
+        // Each photo in the link's color, with the position of its color code.
+        let templates: [(tokens: [String], at: Int)] = matching.compactMap { url in
+            let t = tokens(url)
+            return t.firstIndex(where: { codes.contains($0) }).map { (t, $0) }
+        }
+        func isOtherColor(_ url: URL) -> Bool {
+            let t = tokens(url)
+            return templates.contains { template in
+                guard t.count == template.tokens.count, t[template.at] != template.tokens[template.at],
+                      t[template.at].count == template.tokens[template.at].count else { return false }
+                let otherDifferences = zip(t, template.tokens).enumerated()
+                    .filter { $0.offset != template.at && $0.element.0 != $0.element.1 }.count
+                return otherDifferences <= 1
+            }
+        }
+        return matching + urls.filter { !photo($0, matchesColorIn: pageURL) && !isOtherColor($0) }
     }
 
     static func resolve(_ string: String, against base: URL) -> URL? {
@@ -509,7 +588,8 @@ enum CategoryGuesser {
         let rules: [(Category, [String])] = [
             (.shoes, ["sneaker", "trainer", "loafer", "boot", "shoe", "sandal", "derby", "oxford shoe", "mule", "heel", "espadrille", "slipper"]),
             (.dress, ["dress", "jumpsuit", "romper", "overall", "gown"]),
-            (.outerwear, ["jacket", "coat", "parka", "blazer", "anorak", "overshirt", "chore", "trench", "puffer", "gilet", "vest", "bomber"]),
+            (.jacket, ["jacket", "blazer", "overshirt", "shacket", "chore", "bomber", "trucker", "harrington", "windbreaker", "sport coat"]),
+            (.outerwear, ["coat", "parka", "anorak", "trench", "puffer", "gilet", "vest"]),
             (.bottom, ["jean", "trouser", "pants", "chino", "shorts", "skirt", "legging", "jogger"]),
             (.accessory, ["bag", "tote", "belt", "scarf", "hat", "beanie", "cap", "sock", "wallet", "sunglass", "glove", "tie", "watch", "necklace", "ring", "bracelet"]),
             (.top, ["shirt", "tee", "t-shirt", "henley", "polo", "sweater", "crewneck", "cardigan", "hoodie", "sweatshirt", "blouse", " top", "tank", "knit", "jumper", "turtleneck"]),

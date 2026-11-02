@@ -293,7 +293,7 @@ private struct LookCollage: View {
 
     /// Outerwear and tops first so they sit at the back-top of the collage.
     private var ordered: [ClothingItem] {
-        let rank: [Category: Int] = [.outerwear: 0, .top: 1, .dress: 1, .bottom: 2, .shoes: 3, .accessory: 4]
+        let rank: [Category: Int] = [.outerwear: 0, .jacket: 0, .top: 1, .dress: 1, .bottom: 2, .shoes: 3, .accessory: 4]
         return pieces.sorted { rank[$0.category, default: 5] < rank[$1.category, default: 5] }
     }
 }

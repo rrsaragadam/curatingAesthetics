@@ -42,6 +42,19 @@ enum ImageProcessor {
         var hasPerson: Bool
         /// Body joints in normalized, top-left-origin coordinates.
         var joints: [VNHumanBodyPoseObservation.JointName: CGPoint] = [:]
+        /// The piece's main color: the lifted subject's, or for a model photo,
+        /// the color where the piece sits on the body.
+        var pieceColor: RGB?
+        /// The lifted subject sits clear of the photo's edges, as a product shot
+        /// does. A close-up of the fabric or a pocket fills the frame instead.
+        var isolated = false
+        /// How much of the subject is its main color. A row of the piece in
+        /// every color scores low (0.4 to 0.65 on Uniqlo's), a single piece
+        /// high (0.95 and up).
+        var colorPurity = 0.0
+
+        /// A photo of just the piece, whole and on its own.
+        var isProductShot: Bool { !hasPerson && isolated && colorPurity >= 0.75 }
 
         /// Where a piece of `category` sits on the person, padded a little,
         /// or nil when the pose doesn't show enough of the body to tell.
@@ -57,10 +70,12 @@ enum ImageProcessor {
 
             var top: CGFloat, bottom: CGFloat, xRange: [CGFloat], padX: CGFloat
             switch category {
-            case .top, .outerwear:
-                guard let s = shoulders.min(), let h = hips.max(), !arms.isEmpty else { return nil }
+            case .top, .jacket, .outerwear:
+                guard let s = shoulders.min(), !arms.isEmpty else { return nil }
                 top = s - 0.05
-                bottom = h + (category == .outerwear ? 0.14 : 0.07)
+                // A half-length shot ends above the hips; the piece runs to the edge.
+                let below: CGFloat = category == .outerwear ? 0.14 : category == .jacket ? 0.1 : 0.07
+                bottom = hips.max().map { $0 + below } ?? 1
                 xRange = arms; padX = 0.07
             case .dress:
                 guard let s = shoulders.min(), let low = (ankles + knees).max(), !arms.isEmpty else { return nil }
@@ -85,9 +100,10 @@ enum ImageProcessor {
         }
     }
 
-    /// Looks for a person in the photo: a face, a body, or enough body joints
-    /// (a legs-only shot of trousers still counts).
-    static func check(imageData: Data) async -> PhotoCheck? {
+    /// Looks for a person in the photo (a face, a body, or enough body joints:
+    /// a legs-only shot of trousers still counts), and measures the piece's
+    /// color and whether it stands alone, assuming it's a `category`.
+    static func check(imageData: Data, category: Category) async -> PhotoCheck? {
         await Task.detached(priority: .userInitiated) { () -> PhotoCheck? in
             guard let image = CIImage(data: imageData, options: [.applyOrientationProperty: true]) else { return nil }
             let faces = VNDetectFaceRectanglesRequest()
@@ -106,7 +122,35 @@ enum ImageProcessor {
             }
             let hasFace = faces.results?.contains { $0.confidence > 0.6 } ?? false
             let hasBody = humans.results?.contains { $0.confidence > 0.6 } ?? false
-            return PhotoCheck(hasPerson: hasFace || hasBody || joints.count >= 5, joints: joints)
+            var result = PhotoCheck(hasPerson: hasFace || hasBody || joints.count >= 5, joints: joints)
+
+            // Color work runs on a small copy; it only needs a rough answer.
+            var small = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+            let s = min(1, 512 / max(small.extent.width, small.extent.height))
+            small = small.transformed(by: CGAffineTransform(scaleX: s, y: s))
+
+            if result.hasPerson {
+                guard let region = result.garmentRegion(for: category),
+                      let cg = ciContext.createCGImage(small, from: small.extent), let bitmap = Bitmap(cg) else { return result }
+                // The middle of the region, clear of arms and background.
+                let w = CGFloat(bitmap.width), h = CGFloat(bitmap.height)
+                let core = CGRect(x: (region.midX - region.width * 0.18) * w, y: (region.minY + region.height * 0.3) * h,
+                                  width: region.width * 0.36 * w, height: region.height * 0.4 * h).integral
+                result.pieceColor = bitmap.dominantColor(in: core, requireOpaque: false)
+                return result
+            }
+
+            guard let cutout = liftSubject(from: small),
+                  let cg = ciContext.createCGImage(cutout, from: small.extent), let bitmap = Bitmap(cg),
+                  let bounds = bitmap.opaqueBounds() else { return result }
+            let margin = CGFloat(min(bitmap.width, bitmap.height)) * 0.02
+            result.isolated = bounds.minX > margin && bounds.minY > margin
+                && bounds.maxX < CGFloat(bitmap.width) - margin && bounds.maxY < CGFloat(bitmap.height) - margin
+            if let color = bitmap.dominantColor(in: bounds, requireOpaque: true) {
+                result.pieceColor = color
+                result.colorPurity = bitmap.share(near: color, in: bounds)
+            }
+            return result
         }.value
     }
 
@@ -185,7 +229,8 @@ enum ImageProcessor {
         let rules: [(Category, [String])] = [
             (.shoes, ["shoe", "sneaker", "boot", "sandal", "footwear", "loafer", "heel"]),
             (.dress, ["dress", "gown", "jumpsuit"]),
-            (.outerwear, ["coat", "jacket", "parka", "blazer", "vest"]),
+            (.outerwear, ["coat", "parka", "vest"]),
+            (.jacket, ["jacket", "blazer"]),
             (.bottom, ["jeans", "pants", "trouser", "shorts", "skirt", "denim"]),
             (.accessory, ["bag", "handbag", "purse", "backpack", "hat", "cap", "scarf", "belt", "sunglasses",
                           "eyeglasses", "watch", "jewelry", "necklace", "tie"]),
@@ -265,6 +310,25 @@ private struct Bitmap {
         let x0 = max(0, minX - step), y0 = max(0, minY - step)
         let x1 = min(width, maxX + step + 1), y1 = min(height, maxY + step + 1)
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// The share of opaque pixels in a region within a small color distance of `color`.
+    func share(near color: RGB, in rect: CGRect, within limit: Double = 18) -> Double {
+        let r = rect.intersection(fullRect)
+        guard !r.isEmpty else { return 0 }
+        let step = max(1, Int(max(r.width, r.height)) / 120)
+        var near = 0, total = 0
+        for y in stride(from: Int(r.minY), to: Int(r.maxY), by: step) {
+            for x in stride(from: Int(r.minX), to: Int(r.maxX), by: step) {
+                let i = (y * width + x) * 4
+                let a = Double(pixels[i + 3])
+                guard a >= 220 else { continue }
+                let rgb = RGB(r: Double(pixels[i]) / a, g: Double(pixels[i + 1]) / a, b: Double(pixels[i + 2]) / a)
+                total += 1
+                if rgb.distance(to: color) < limit { near += 1 }
+            }
+        }
+        return total == 0 ? 0 : Double(near) / Double(total)
     }
 
     /// The most common color in a region, found by bucketing pixels and

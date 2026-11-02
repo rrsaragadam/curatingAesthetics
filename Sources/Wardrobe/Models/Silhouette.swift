@@ -5,7 +5,7 @@ import Foundation
 enum Silhouette: String, Codable, CaseIterable, Identifiable {
     case unknown
     case slim, fitted, regular, straight, relaxed, boxy, oversized
-    case cropped, tapered, wideLeg, bootcut, flared, aLine
+    case cropped, tapered, barrel, wideLeg, bootcut, flared, aLine
 
     var id: String { rawValue }
 
@@ -21,6 +21,7 @@ enum Silhouette: String, Codable, CaseIterable, Identifiable {
         case .oversized: return "Oversized"
         case .cropped: return "Cropped"
         case .tapered: return "Tapered"
+        case .barrel: return "Barrel"
         case .wideLeg: return "Wide leg"
         case .bootcut: return "Bootcut"
         case .flared: return "Flared"
@@ -36,7 +37,8 @@ enum Silhouette: String, Codable, CaseIterable, Identifiable {
     static func guess(from text: String, labeled: Bool = false) -> Silhouette? {
         let t = text.lowercased().replacingOccurrences(of: "-", with: " ")
         let rules: [(Silhouette, [String])] = [
-            (.wideLeg, ["wide leg", "wide fit", "wide pants", "wide pant", "wide trousers", "wide trouser", "wide jeans", "palazzo", "barrel leg"]),
+            (.barrel, ["barrel", "horseshoe", "curved leg", "balloon leg"]),
+            (.wideLeg, ["wide leg", "wide fit", "wide pants", "wide pant", "wide trousers", "wide trouser", "wide jeans", "palazzo"]),
             (.bootcut, ["bootcut", "boot cut"]),
             (.flared, ["flared", "flare leg", "flare fit"]),
             (.aLine, ["a line"]),
