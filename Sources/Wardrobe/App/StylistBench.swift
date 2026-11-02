@@ -103,7 +103,16 @@ enum StylistBench {
         timings.append(gapSeconds)
         if gapError != nil { failures += 1 }
         out += "\(String(format: "%.1f", gapSeconds))s\n\n"
-        out += (gaps ?? ["Failed: \(gapError ?? "")"]).map { "- \($0)" }.joined(separator: "\n") + "\n\n"
+        if let gaps {
+            out += "Style: \(gaps.style)\n\n"
+            for gap in gaps.pieces {
+                out += "- *\(gap.name)* (\(gap.category.singular.lowercased()), \(ColorNamer.name(forHex: gap.colorHex).lowercased()) "
+                    + "\(gap.fabric.label.lowercased())), with \(names(gap.pairsWith)). \(gap.why)\n"
+            }
+            out += "\n"
+        } else {
+            out += "- Failed: \(gapError ?? "")\n\n"
+        }
 
         let sorted = timings.sorted()
         out += "### Summary\n\n"

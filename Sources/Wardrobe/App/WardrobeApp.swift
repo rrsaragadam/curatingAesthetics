@@ -85,6 +85,7 @@ final class AppNavigation {
     var outfitToEdit: UUID?
     /// Set by the sidebar's stylist card; the builder asks for a look and clears this.
     var stylistRequest: UUID?
+    var showStylistGaps = false
 
     func style(_ item: ClothingItem) {
         pieceToStyle = item.id

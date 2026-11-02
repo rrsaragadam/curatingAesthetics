@@ -131,11 +131,15 @@ private struct StylistCard: View {
                 .foregroundStyle(Theme.forestMuted)
                 .fixedSize(horizontal: false, vertical: true)
             if isAvailable {
-                Button("Suggest a look") { nav.askStylist() }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.forestText)
-                    .padding(.top, 2)
+                HStack(spacing: 14) {
+                    Button("Suggest a look") { nav.askStylist() }
+                    Button("Find gaps") { nav.showStylistGaps = true }
+                        .help("Pieces that fit your style and work with what you own")
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.forestText)
+                .padding(.top, 2)
             }
         }
         .padding(12)

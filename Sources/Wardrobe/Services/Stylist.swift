@@ -14,6 +14,24 @@ struct StylistLook: Identifiable, Hashable {
     var wasRepaired = false
 }
 
+/// A piece you don't own yet that fits your style and works with what you have.
+struct StylistGap: Identifiable, Hashable {
+    var id = UUID()
+    var name: String
+    var category: Category
+    var colorHex: String
+    var fabric: Fabric
+    var why: String
+    /// Pieces you own that it would be worn with.
+    var pairsWith: [UUID]
+}
+
+/// The stylist's read of a closet: its style in a sentence, and what's missing.
+struct StylistGaps: Hashable {
+    var style: String
+    var pieces: [StylistGap]
+}
+
 /// The hook for a stylist. The sidebar card and the builder's "This look"
 /// panel are where its answers show up.
 protocol Stylist {
@@ -26,8 +44,9 @@ protocol Stylist {
     /// sneakers to match the canvas jacket").
     func critique(outfit: [ClothingItem], occasion: Occasion, closet: [ClothingItem]) async throws -> String
 
-    /// Pieces that would unlock the most new outfits from what you already own.
-    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> [String]
+    /// Pieces that fit your style and would unlock the most new outfits from
+    /// what you already own.
+    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> StylistGaps
 }
 
 enum StylistProvider {
@@ -126,13 +145,6 @@ enum LookRepair {
 // MARK: - On-device stylist
 
 #if canImport(FoundationModels)
-@available(macOS 26, *)
-@Generable
-struct GeneratedGaps {
-    @Guide(description: "Specific pieces to buy, each with a color and fabric, like \"Navy wool blazer\", followed by a colon and a reason of at most twelve words.", .count(3))
-    var pieces: [String]
-}
-
 /// Apple's on-device model through the Foundation Models framework. It reads
 /// each piece's details as text (it can't see photos), runs offline, and costs
 /// nothing per request.
@@ -255,18 +267,94 @@ struct OnDeviceStylist: Stylist {
         return works + " Add the \(swapIn.name.lowercased())" + tail
     }
 
-    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> [String] {
-        let labels = Labels(Self.trim(closet, season: .current(), keeping: []))
+    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> StylistGaps {
+        do {
+            return try await gaps(from: Self.trim(closet, season: .current(), keeping: []))
+        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+            // A long answer can run past the window; ask again about fewer pieces.
+            return try await gaps(from: Array(Self.trim(closet, season: .current(), keeping: []).prefix(max(6, closet.count * 2 / 3))))
+        }
+    }
+
+    private func gaps(from pieces: [ClothingItem]) async throws -> StylistGaps {
+        let labels = Labels(pieces)
+        let counts = Category.allCases.map { c in "\(pieces.filter { $0.category == c }.count) \(c.label.lowercased())" }
+        func common(_ values: [String]) -> String {
+            let tally = Dictionary(values.filter { !$0.isEmpty }.map { ($0, 1) }, uniquingKeysWith: +)
+            return tally.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(4).map(\.key).joined(separator: ", ")
+        }
         let prompt = """
             Closet:
             \(labels.text)
 
-            Suggest three pieces this person doesn't own yet that would create the most new outfits with \
-            what they already have.
+            The closet has \(counts.joined(separator: ", ")).
+            Most common colors: \(common(pieces.map { $0.displayColorName.lowercased() })).
+            Most common fabrics: \(common(pieces.compactMap { $0.fabric == .unknown ? nil : $0.fabric.label.lowercased() })).
+            Most common cuts: \(common(pieces.compactMap { $0.silhouette == .unknown ? nil : $0.silhouette.label.lowercased() })).
+            Formality: \(common(pieces.map { $0.formality.label.lowercased() })).
+
+            First describe this person's style in one specific sentence that names their colors and cuts. \
+            Then suggest five different pieces they don't own yet that fit that style and would create the \
+            most new outfits with what they have. Favor categories with few pieces, and don't suggest \
+            anything close to a piece they already own.
             """
+        let others = pieces.isEmpty ? [Self.none] : pieces.map(labels.label)
+        let gap = DynamicGenerationSchema(name: "Gap", properties: [
+            .init(name: "name", description: "The piece to look for, first, two to four words with color and fabric, like Navy wool blazer",
+                  schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "category", description: "The kind of piece it is",
+                  schema: DynamicGenerationSchema(name: "GapCategory", anyOf: Category.allCases.map(\.singular))),
+            .init(name: "color", description: "The closest color to the one in its name",
+                  schema: DynamicGenerationSchema(name: "GapColor", anyOf: ColorNamer.palette.map(\.0))),
+            .init(name: "fabric", description: "The closest fabric to the one in its name",
+                  schema: DynamicGenerationSchema(name: "GapFabric", anyOf: Fabric.allCases.filter { $0 != .unknown }.map(\.label))),
+            .init(name: "pairsWith", description: "Two or three pieces they own that it goes with",
+                  schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(name: "Owned", anyOf: others),
+                                                  minimumElements: 2, maximumElements: 3)),
+            .init(name: "why", description: "One sentence on how it fits their style and what it unlocks with those pieces",
+                  schema: DynamicGenerationSchema(type: String.self)),
+        ])
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "Gaps", properties: [
+            .init(name: "style", description: "One sentence describing their style",
+                  schema: DynamicGenerationSchema(type: String.self)),
+            .init(name: "gaps", schema: DynamicGenerationSchema(arrayOf: gap, minimumElements: 5, maximumElements: 5)),
+        ]), dependencies: [])
+
         let session = LanguageModelSession(instructions: Self.instructions)
-        return try await session.respond(to: prompt, generating: GeneratedGaps.self,
-                                         options: GenerationOptions(maximumResponseTokens: 200)).content.pieces
+        let content = try await session.respond(to: prompt, schema: schema,
+                                                options: GenerationOptions(maximumResponseTokens: 750)).content
+        let drafts = try content.value([GeneratedContent].self, forProperty: "gaps")
+        let gaps = drafts.compactMap { draft -> StylistGap? in
+            guard let name = try? draft.value(String.self, forProperty: "name"), !name.isEmpty else { return nil }
+            let categoryLabel = try? draft.value(String.self, forProperty: "category")
+            let colorName = try? draft.value(String.self, forProperty: "color")
+            let fabricLabel = try? draft.value(String.self, forProperty: "fabric")
+            let owned = ((try? draft.value([String].self, forProperty: "pairsWith")) ?? []).compactMap(labels.item)
+            let category = Category.allCases.first { $0.singular == categoryLabel } ?? .top
+            let colorHex = ColorNamer.palette.first { $0.0 == colorName }?.1 ?? "#B8A88A"
+            let fabric = Fabric.allCases.first { $0.label == fabricLabel } ?? .unknown
+            // Skip near-copies of something already owned (navy denim jeans
+            // when there are indigo denim jeans).
+            let slot = BuilderSlot.slot(for: category)
+            let family = ColorFamily.of(hex: colorHex)
+            if pieces.contains(where: { BuilderSlot.slot(for: $0.category) == slot && $0.colorFamily == family
+                && ($0.fabric == fabric || $0.fabric == .unknown) }) { return nil }
+            // It's worn with pieces from other slots, not instead of them.
+            var seen = Set<UUID>()
+            let pairs = owned.filter { BuilderSlot.slot(for: $0.category) != slot }.map(\.id)
+                .filter { seen.insert($0).inserted }
+            return StylistGap(name: name.replacingOccurrences(of: "**", with: ""), category: category,
+                              colorHex: colorHex, fabric: fabric,
+                              why: ((try? draft.value(String.self, forProperty: "why")) ?? "").replacingOccurrences(of: "**", with: ""),
+                              pairsWith: pairs)
+        }
+        // Different kinds of pieces first, at most four.
+        var kinds = Set<String>()
+        let varied = gaps.filter { kinds.insert($0.name.lowercased()).inserted }
+        let picked = Array((varied.filter { g in varied.first { $0.category == g.category } == g }
+            + varied.filter { g in varied.first { $0.category == g.category } != g }).prefix(4))
+        let style = ((try? content.value(String.self, forProperty: "style")) ?? "").replacingOccurrences(of: "**", with: "")
+        return StylistGaps(style: style, pieces: picked)
     }
 
     /// Keeps the prompt inside the model's window: locked pieces first, then

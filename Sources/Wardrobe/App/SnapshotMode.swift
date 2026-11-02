@@ -69,7 +69,8 @@ enum SnapshotMode {
         // Waits for the on-device stylist; without Apple Intelligence this
         // shows the builder unchanged.
         Shot(name: "builder-stylist", wait: 10) { _, nav in nav.askStylist() },
-        Shot(name: "lookbook") { _, nav in nav.section = .lookbook },
+        Shot(name: "stylist-gaps", wait: 14) { _, nav in nav.showStylistGaps = true },
+        Shot(name: "lookbook") { _, nav in nav.showStylistGaps = false; nav.section = .lookbook },
         Shot(name: "add-from-link") { _, nav in nav.section = .closet; nav.showAddFromLink = true },
     ]
 
