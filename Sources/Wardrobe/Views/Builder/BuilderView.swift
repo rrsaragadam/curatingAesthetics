@@ -40,7 +40,7 @@ struct BuilderView: View {
     @State private var justSaved: UUID?
     @State private var didSetUp = false
     /// The stylist's last word, kept while the builder still shows those pieces.
-    @State private var stylistNote: (itemIDs: Set<UUID>, title: String, text: String)?
+    @State private var stylistNote: (itemIDs: Set<UUID>, title: String, text: String, isLook: Bool)?
     @State private var isStyling = false
     private let stylist = StylistProvider.current
 
@@ -109,6 +109,7 @@ struct BuilderView: View {
                                   match: match, justSaved: justSaved == match?.id && match != nil,
                                   stylistNote: currentStylistNote, isStylistBusy: isStyling,
                                   onAskStylist: stylist == nil ? nil : critique,
+                                  onDeclineLook: stylistNote?.isLook == true && currentStylistNote != nil ? declineLook : nil,
                                   onSave: save)
                         .frame(width: 320)
                 }
@@ -322,7 +323,7 @@ struct BuilderView: View {
         Task {
             defer { isStyling = false }
             do {
-                let looks = try await stylist.suggest(from: store.items, saved: store.outfits, occasion: occasion,
+                let looks = try await stylist.suggest(from: store.items, saved: store.outfits, taste: store.taste, occasion: occasion,
                                                       season: .current(), keeping: keeping, count: 1)
                 guard let look = looks.first else { return }
                 animate {
@@ -332,11 +333,18 @@ struct BuilderView: View {
                     }
                     name = look.name
                 }
-                stylistNote = (Set(look.itemIDs), "Stylist", look.why)
+                stylistNote = (Set(look.itemIDs), "Stylist", look.why, true)
             } catch {
-                stylistNote = (Set(currentItems.map(\.id)), "Stylist", "Couldn't put a look together: \(error.localizedDescription)")
+                stylistNote = (Set(currentItems.map(\.id)), "Stylist", "Couldn't put a look together: \(error.localizedDescription)", false)
             }
         }
+    }
+
+    /// Remembers that the stylist's look missed, and asks for another.
+    private func declineLook(_ reason: DeclineReason) {
+        store.decline(look: currentItems.map(\.id), because: reason)
+        stylistNote = nil
+        styleMe()
     }
 
     /// Asks the stylist what works about the current look and what to swap.
@@ -352,7 +360,7 @@ struct BuilderView: View {
             } catch {
                 text = "Couldn't read this look: \(error.localizedDescription)"
             }
-            stylistNote = (Set(items.map(\.id)), "Stylist", text)
+            stylistNote = (Set(items.map(\.id)), "Stylist", text, false)
         }
     }
 

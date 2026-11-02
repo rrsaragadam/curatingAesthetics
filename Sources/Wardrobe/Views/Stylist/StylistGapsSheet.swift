@@ -11,6 +11,8 @@ struct StylistGapsSheet: View {
 
     @State private var phase: Phase = .loading
     @State private var task: Task<Void, Never>?
+    /// Suggestions turned down in this sheet, hidden right away.
+    @State private var declined: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -41,6 +43,12 @@ struct StylistGapsSheet: View {
             .frame(maxHeight: .infinity)
 
             HStack {
+                if !store.taste.isEmpty {
+                    Button("Forget \(store.taste.count) turned down") { store.resetTaste() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11.5))
+                        .help("Clear what the stylist learned from suggestions you turned down")
+                }
                 Text(StylistVision.isAvailable ? "Suggested on this Mac from your photos and each piece's details."
                                                : "Suggested on this Mac from each piece's details.")
                     .font(.system(size: 11.5))
@@ -75,8 +83,18 @@ struct StylistGapsSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.bottom, 4)
                 }
-                ForEach(gaps.pieces) { gap in
-                    GapCard(gap: gap)
+                ForEach(gaps.pieces.filter { !declined.contains($0.id) }) { gap in
+                    GapCard(gap: gap) { reason in
+                        store.decline(gap, because: reason)
+                        _ = withAnimation(Motion.settle) { declined.insert(gap.id) }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
+                if gaps.pieces.allSatisfy({ declined.contains($0.id) }) {
+                    Text("Noted. Ask for more ideas and the stylist will steer around what you turned down.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.inkSecondary)
+                        .padding(.top, 4)
                 }
             }
         }
@@ -93,10 +111,11 @@ struct StylistGapsSheet: View {
             return
         }
         phase = .loading
+        declined = []
         task?.cancel()
         task = Task {
             do {
-                let gaps = try await stylist.gaps(in: store.items, outfits: store.outfits)
+                let gaps = try await stylist.gaps(in: store.items, outfits: store.outfits, taste: store.taste)
                 if !Task.isCancelled { withAnimation(Motion.settle) { phase = .done(gaps) } }
             } catch {
                 if !Task.isCancelled { phase = .failed("Couldn't read your closet: \(error.localizedDescription)") }
@@ -108,7 +127,7 @@ struct StylistGapsSheet: View {
 private struct GapCard: View {
     @Environment(WardrobeStore.self) private var store
     let gap: StylistGap
-    @State private var showPinterest = false
+    let onDecline: (DeclineReason) -> Void
 
     private var query: String { ProductSearch.query(for: gap, closet: store.items) }
 
@@ -156,9 +175,12 @@ private struct GapCard: View {
                     .padding(.top, 2)
                 }
                 HStack(spacing: 14) {
-                    Button { showPinterest = true } label: {
-                        Label("See it on Pinterest", systemImage: "photo.on.rectangle")
+                    Button {
+                        if let url = ProductSearch.pinterestURL(query) { NSWorkspace.shared.open(url) }
+                    } label: {
+                        Label("See it on Pinterest", systemImage: "arrow.up.right.square")
                     }
+                    .help("Opens Pinterest in your browser")
                     Menu {
                         if let url = ProductSearch.shoppingURL(query) {
                             Button("Search all stores") { NSWorkspace.shared.open(url) }
@@ -178,6 +200,8 @@ private struct GapCard: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    Spacer(minLength: 0)
+                    DeclineMenu(onDecline: onDecline)
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 12, weight: .semibold))
@@ -185,7 +209,6 @@ private struct GapCard: View {
             }
             Spacer(minLength: 0)
         }
-        .sheet(isPresented: $showPinterest) { PinterestSheet(query: query) }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line) }

@@ -38,6 +38,8 @@ struct ThisLookPanel: View {
     var isStylistBusy = false
     /// Nil when no stylist is available.
     var onAskStylist: (() -> Void)?
+    /// Set while the stylist's own suggestion is showing.
+    var onDeclineLook: ((DeclineReason) -> Void)?
     let onSave: () -> Void
 
     @Environment(WardrobeStore.self) private var store
@@ -81,6 +83,10 @@ struct ThisLookPanel: View {
                 if let stylistNote {
                     note(stylistNote.title, stylistNote.text)
                         .transition(.opacity)
+                    if let onDeclineLook {
+                        DeclineMenu(onDecline: onDeclineLook)
+                            .help("Tell the stylist this look misses, and get another")
+                    }
                 } else if let onAskStylist, !items.isEmpty {
                     Button(action: onAskStylist) {
                         Label(isStylistBusy ? "Thinking…" : "Ask the stylist about this look", systemImage: "sparkles")

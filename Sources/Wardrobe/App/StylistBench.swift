@@ -6,7 +6,9 @@ import Foundation
 /// on a read-only copy of the real library, times every call, writes a report
 /// and quits. Nothing is saved to either library; photo descriptions are
 /// cached next to the report, so delete that file to time them from scratch.
-/// `WARDROBE_STYLIST_BENCH_LIBRARY_ONLY=1` skips the sample closet.
+/// `WARDROBE_STYLIST_BENCH_LIBRARY_ONLY=1` skips the sample closet, and
+/// `WARDROBE_STYLIST_BENCH_TASTE=1` only checks that turning suggestions
+/// down changes the next ones.
 @MainActor
 enum StylistBench {
     static let outputURL: URL? = ProcessInfo.processInfo.environment["WARDROBE_STYLIST_BENCH"]
@@ -29,7 +31,11 @@ enum StylistBench {
             }
             if let real = realLibrary(), !real.items.isEmpty {
                 report += await describePhotos(real.items)
-                report += await bench(stylist, title: "Your library", closet: real.items, saved: real.outfits)
+                if ProcessInfo.processInfo.environment["WARDROBE_STYLIST_BENCH_TASTE"] != nil {
+                    report += await benchTaste(stylist, closet: real.items, saved: real.outfits)
+                } else {
+                    report += await bench(stylist, title: "Your library", closet: real.items, saved: real.outfits)
+                }
             }
             finish(report, to: outputURL)
         }
@@ -59,7 +65,7 @@ enum StylistBench {
         out += "### Looks\n\n"
         for occasion in Occasion.allCases {
             let (looks, seconds, error) = await timed {
-                try await stylist.suggest(from: closet, saved: saved, occasion: occasion, season: season,
+                try await stylist.suggest(from: closet, saved: saved, taste: StylistTaste(), occasion: occasion, season: season,
                                           keeping: [], count: 3)
             }
             timings.append(seconds)
@@ -76,7 +82,7 @@ enum StylistBench {
         // One builder-style request: a single look around a locked piece.
         if let anchor = closet.first(where: { $0.category == .jacket || $0.category == .outerwear }) ?? closet.first {
             let (looks, seconds, error) = await timed {
-                try await stylist.suggest(from: closet, saved: saved, occasion: .weekend, season: season,
+                try await stylist.suggest(from: closet, saved: saved, taste: StylistTaste(), occasion: .weekend, season: season,
                                           keeping: [anchor], count: 1)
             }
             timings.append(seconds)
@@ -104,7 +110,7 @@ enum StylistBench {
         }
 
         out += "### Gaps\n\n"
-        let (gaps, gapSeconds, gapError) = await timed { try await stylist.gaps(in: closet, outfits: saved) }
+        let (gaps, gapSeconds, gapError) = await timed { try await stylist.gaps(in: closet, outfits: saved, taste: StylistTaste()) }
         timings.append(gapSeconds)
         if gapError != nil { failures += 1 }
         out += "\(String(format: "%.1f", gapSeconds))s\n\n"
@@ -125,6 +131,39 @@ enum StylistBench {
         out += "- Time per call: median \(String(format: "%.1f", sorted[sorted.count / 2]))s, "
             + "fastest \(String(format: "%.1f", sorted.first ?? 0))s, slowest \(String(format: "%.1f", sorted.last ?? 0))s\n"
         out += "- Looks: \(looksTotal), repaired by the app: \(repaired)\n\n"
+        return out
+    }
+
+    /// Turns down suggestions and asks again, to see the stylist steer around them.
+    private static func benchTaste(_ stylist: Stylist, closet: [ClothingItem], saved: [Outfit]) async -> String {
+        var out = "## Turning suggestions down\n\n"
+        var taste = StylistTaste()
+        func gapList(_ gaps: StylistGaps) -> String {
+            "Style: \(gaps.style)\n\n" + gaps.pieces.map { "- \($0.name) (\(ColorNamer.name(forHex: $0.colorHex).lowercased()))" }
+                .joined(separator: "\n") + "\n\n"
+        }
+        for round in 1...3 {
+            guard let gaps = try? await stylist.gaps(in: closet, outfits: saved, taste: taste) else {
+                out += "Round \(round) failed\n\n"; break
+            }
+            out += "### Gaps, round \(round)\n\n" + gapList(gaps)
+            // Turn the first two down: one as not my style, one for its color.
+            for (gap, reason) in zip(gaps.pieces.prefix(2), [DeclineReason.notMyStyle, .color]) {
+                taste.pieces.append(.init(name: gap.name, category: gap.category, colorName: ColorNamer.name(forHex: gap.colorHex),
+                                          fabric: gap.fabric, reason: reason))
+                out += "Turned down: \(gap.name) (\(reason.label.lowercased()))\n"
+            }
+            out += "\n"
+        }
+        for round in 1...3 {
+            guard let look = try? await stylist.suggest(from: closet, saved: saved, taste: taste, occasion: .everyday,
+                                                        season: .current(), keeping: [], count: 1).first else {
+                out += "Look round \(round) failed\n\n"; break
+            }
+            let names = look.itemIDs.compactMap { id in closet.first { $0.id == id }?.name }.joined(separator: " + ")
+            out += "### Look, round \(round)\n\n- \(names)\n\nTurned down (too casual)\n\n"
+            taste.looks.append(.init(itemIDs: look.itemIDs, reason: .tooCasual))
+        }
         return out
     }
 

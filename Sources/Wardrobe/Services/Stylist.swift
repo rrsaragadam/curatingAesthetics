@@ -36,17 +36,18 @@ struct StylistGaps: Hashable {
 /// panel are where its answers show up.
 protocol Stylist {
     /// Complete outfits for an occasion, built only from `closet`. Every look
-    /// includes `keeping` (pieces locked in the builder).
-    func suggest(from closet: [ClothingItem], saved: [Outfit], occasion: Occasion, season: Season,
+    /// includes `keeping` (pieces locked in the builder) and steers clear of
+    /// combinations `taste` says were turned down.
+    func suggest(from closet: [ClothingItem], saved: [Outfit], taste: StylistTaste, occasion: Occasion, season: Season,
                  keeping: [ClothingItem], count: Int) async throws -> [StylistLook]
 
     /// Short, specific feedback on a combination ("swap the loafers for the
     /// sneakers to match the canvas jacket").
     func critique(outfit: [ClothingItem], occasion: Occasion, closet: [ClothingItem]) async throws -> String
 
-    /// Pieces that fit your style and would unlock the most new outfits from
-    /// what you already own.
-    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> StylistGaps
+    /// Pieces that fit your style (the closet plus what `taste` says was
+    /// turned down) and would unlock the most new outfits from what you own.
+    func gaps(in closet: [ClothingItem], outfits: [Outfit], taste: StylistTaste) async throws -> StylistGaps
 }
 
 enum StylistProvider {
@@ -169,7 +170,7 @@ struct OnDeviceStylist: Stylist {
 
     private static let none = "none"
 
-    func suggest(from closet: [ClothingItem], saved: [Outfit], occasion: Occasion, season: Season,
+    func suggest(from closet: [ClothingItem], saved: [Outfit], taste: StylistTaste, occasion: Occasion, season: Season,
                  keeping: [ClothingItem], count: Int) async throws -> [StylistLook] {
         let pieces = Self.trim(closet, season: season, keeping: keeping)
         let labels = Labels(pieces, looks: await StylistVision.shared.descriptions(for: pieces))
@@ -178,13 +179,23 @@ struct OnDeviceStylist: Stylist {
             \(labels.text)
 
             Put together \(count) different outfit\(count == 1 ? "" : "s") for \(occasion.label.lowercased()) in \
-            \(season.label.lowercased()). Each outfit should differ from the others by at least two pieces.
+            \(season.label.lowercased())\(taste.formalityLean.map { ", " + $0 } ?? ""). Each outfit should differ from the others by at least two pieces.
             """
         let savedLines = saved.prefix(8).map { outfit in
             outfit.itemIDs.compactMap { id in pieces.first { $0.id == id }.map(labels.label) }.joined(separator: " + ")
         }.filter { !$0.isEmpty }
         if !savedLines.isEmpty {
             prompt += "\nThese are already saved, so make something new: " + savedLines.joined(separator: "; ") + "."
+        }
+        let declinedLines = taste.looks.suffix(8).reversed().compactMap { look -> String? in
+            let names = look.itemIDs.compactMap { id in pieces.first { $0.id == id }.map(labels.label) }
+            return names.count < 2 ? nil : names.joined(separator: " + ") + " (\(look.reason.phrase))"
+        }
+        if !declinedLines.isEmpty {
+            prompt += "\nThey turned these combinations down, so avoid them: " + declinedLines.joined(separator: "; ") + "."
+        }
+        if !taste.leanings.isEmpty {
+            prompt += "\nFrom what they've turned down: " + taste.leanings.joined(separator: ", ") + "."
         }
 
         let lockedSlots = Dictionary(keeping.map { (BuilderSlot.slot(for: $0.category), $0) }, uniquingKeysWith: { a, _ in a })
@@ -225,7 +236,8 @@ struct OnDeviceStylist: Stylist {
                 (try? draft.value(String.self, forProperty: slot.rawValue)).flatMap(labels.item)
             }
             guard let fixed = LookRepair.repair(raw, keeping: keeping, closet: pieces,
-                                                occasion: occasion, season: season) else { continue }
+                                                occasion: occasion, season: season),
+                  !taste.declined(look: fixed.items.map(\.id)) else { continue }
             looks.append(StylistLook(name: (try? draft.value(String.self, forProperty: "name")) ?? "Stylist pick",
                                      itemIDs: fixed.items.map(\.id),
                                      why: (try? draft.value(String.self, forProperty: "why")) ?? "",
@@ -283,23 +295,35 @@ struct OnDeviceStylist: Stylist {
         return works + " Add the \(swapIn.name.lowercased())" + tail
     }
 
-    func gaps(in closet: [ClothingItem], outfits: [Outfit]) async throws -> StylistGaps {
+    func gaps(in closet: [ClothingItem], outfits: [Outfit], taste: StylistTaste) async throws -> StylistGaps {
+        var result = try await gapsFittingWindow(in: closet, taste: taste)
+        // What you've turned down can rule out most of an answer; ask once
+        // more and keep the new pieces.
+        if result.pieces.count < 3, !taste.isEmpty, let more = try? await gapsFittingWindow(in: closet, taste: taste) {
+            let names = Set(result.pieces.map { $0.name.lowercased() })
+            result.pieces += more.pieces.filter { !names.contains($0.name.lowercased()) }.prefix(4 - result.pieces.count)
+        }
+        return result
+    }
+
+    private func gapsFittingWindow(in closet: [ClothingItem], taste: StylistTaste) async throws -> StylistGaps {
         do {
-            return try await gaps(from: Self.trim(closet, season: .current(), keeping: []))
+            return try await gaps(from: Self.trim(closet, season: .current(), keeping: []), taste: taste)
         } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
             // A long answer can run past the window; ask again about fewer pieces.
-            return try await gaps(from: Array(Self.trim(closet, season: .current(), keeping: []).prefix(max(6, closet.count * 2 / 3))))
+            return try await gaps(from: Array(Self.trim(closet, season: .current(), keeping: []).prefix(max(6, closet.count * 2 / 3))),
+                                  taste: taste)
         }
     }
 
-    private func gaps(from pieces: [ClothingItem]) async throws -> StylistGaps {
+    private func gaps(from pieces: [ClothingItem], taste: StylistTaste) async throws -> StylistGaps {
         let labels = Labels(pieces, looks: await StylistVision.shared.descriptions(for: pieces))
         let counts = Category.allCases.map { c in "\(pieces.filter { $0.category == c }.count) \(c.label.lowercased())" }
         func common(_ values: [String]) -> String {
             let tally = Dictionary(values.filter { !$0.isEmpty }.map { ($0, 1) }, uniquingKeysWith: +)
             return tally.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(4).map(\.key).joined(separator: ", ")
         }
-        let prompt = """
+        var prompt = """
             Closet:
             \(labels.text)
 
@@ -314,6 +338,13 @@ struct OnDeviceStylist: Stylist {
             most new outfits with what they have. Favor categories with few pieces, and don't suggest \
             anything close to a piece they already own.
             """
+        if !taste.pieces.isEmpty {
+            prompt += "\nThey turned these suggestions down, so don't suggest them or anything like them: "
+                + taste.pieceLines().joined(separator: "; ") + "."
+        }
+        if !taste.leanings.isEmpty {
+            prompt += "\nFrom what they've turned down: " + taste.leanings.joined(separator: ", ") + "."
+        }
         let others = pieces.isEmpty ? [Self.none] : pieces.map(labels.label)
         let gap = DynamicGenerationSchema(name: "Gap", properties: [
             .init(name: "name", description: "The piece to look for, first, two to four words with color and fabric, like Navy wool blazer",
@@ -349,6 +380,7 @@ struct OnDeviceStylist: Stylist {
             let category = Category.allCases.first { $0.singular == categoryLabel } ?? .top
             let colorHex = ColorNamer.palette.first { $0.0 == colorName }?.1 ?? "#B8A88A"
             let fabric = Fabric.allCases.first { $0.label == fabricLabel } ?? .unknown
+            if taste.rules(out: name, category: category, colorName: colorName ?? "", fabric: fabric) { return nil }
             // Skip near-copies of something already owned (navy denim jeans
             // when there are indigo denim jeans).
             let slot = BuilderSlot.slot(for: category)

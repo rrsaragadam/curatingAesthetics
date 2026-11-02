@@ -1,9 +1,8 @@
-import AppKit
-import SwiftUI
-import WebKit
+import Foundation
 
 /// Where to see real versions of a piece the stylist suggests: Pinterest for
-/// how people wear it, and stores for buying it.
+/// how people wear it, and stores for buying it. Both open in your browser,
+/// where you're already signed in and your password manager works.
 enum ProductSearch {
     /// The suggestion as a search, with "men" or "women" added when the
     /// closet's own product names say which.
@@ -40,48 +39,4 @@ enum ProductSearch {
         components?.queryItems = [URLQueryItem(name: "q", value: query)] + extra
         return components?.url
     }
-}
-
-/// Pinterest results for a suggestion, inside the app. Pinterest asks you to
-/// sign in once; the sign-in is kept for next time.
-struct PinterestSheet: View {
-    let query: String
-    @Environment(\.dismiss) private var dismiss
-    @State private var webView = WKWebView()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Button { webView.goBack() } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(.quiet)
-                    .help("Back")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(query).font(.system(size: 14, weight: .semibold))
-                    Text("On Pinterest").font(.system(size: 11.5)).foregroundStyle(Theme.inkSecondary)
-                }
-                Spacer()
-                Button("Open in Browser") {
-                    if let url = webView.url ?? ProductSearch.pinterestURL(query) { NSWorkspace.shared.open(url) }
-                }
-                .buttonStyle(.quiet)
-                Button("Done") { dismiss() }
-                    .buttonStyle(.primary)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
-            Divider()
-            WebPane(webView: webView)
-        }
-        .frame(width: 960, height: 720)
-        .background(Theme.ground)
-        .onAppear {
-            if let url = ProductSearch.pinterestURL(query) { webView.load(URLRequest(url: url)) }
-        }
-    }
-}
-
-private struct WebPane: NSViewRepresentable {
-    let webView: WKWebView
-    func makeNSView(context: Context) -> WKWebView { webView }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
