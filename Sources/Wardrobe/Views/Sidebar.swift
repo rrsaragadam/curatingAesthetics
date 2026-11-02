@@ -105,8 +105,12 @@ private struct SidebarRow: View {
     }
 }
 
-/// Placeholder for the future stylist. See `Stylist.swift` for the hook.
+/// The on-device stylist: a shortcut to a suggested look in the builder, or
+/// why it's unavailable.
 private struct StylistCard: View {
+    @Environment(AppNavigation.self) private var nav
+    private let isAvailable = StylistProvider.current != nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -114,17 +118,25 @@ private struct StylistCard: View {
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(Theme.forestText)
                 Spacer()
-                Text("Later")
+                Text(isAvailable ? "On device" : "Off")
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Color.white.opacity(0.1), in: Capsule())
                     .foregroundStyle(Theme.forestMuted)
             }
-            Text("Feedback on outfits and gaps in your closet will live here.")
+            Text(isAvailable ? "Looks from your closet, put together privately on this Mac."
+                             : StylistProvider.unavailableReason ?? "")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.forestMuted)
                 .fixedSize(horizontal: false, vertical: true)
+            if isAvailable {
+                Button("Suggest a look") { nav.askStylist() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.forestText)
+                    .padding(.top, 2)
+            }
         }
         .padding(12)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

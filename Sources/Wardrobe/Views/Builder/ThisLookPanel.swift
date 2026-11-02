@@ -34,6 +34,10 @@ struct ThisLookPanel: View {
     @Binding var occasion: Occasion
     let match: Outfit?
     let justSaved: Bool
+    var stylistNote: (title: String, text: String)?
+    var isStylistBusy = false
+    /// Nil when no stylist is available.
+    var onAskStylist: (() -> Void)?
     let onSave: () -> Void
 
     @Environment(WardrobeStore.self) private var store
@@ -74,7 +78,20 @@ struct ThisLookPanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 note("Texture mix", OutfitNotes.texture(for: items))
                 if let colorNote = OutfitNotes.color(for: items) { note("Color", colorNote) }
+                if let stylistNote {
+                    note(stylistNote.title, stylistNote.text)
+                        .transition(.opacity)
+                } else if let onAskStylist, !items.isEmpty {
+                    Button(action: onAskStylist) {
+                        Label(isStylistBusy ? "Thinking…" : "Ask the stylist about this look", systemImage: "sparkles")
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .buttonStyle(.link)
+                    .disabled(isStylistBusy)
+                    .padding(.top, 2)
+                }
             }
+            .animation(Motion.quick, value: stylistNote?.text)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

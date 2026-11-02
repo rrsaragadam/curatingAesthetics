@@ -39,6 +39,10 @@ struct BuilderView: View {
     @State private var occasion: Occasion = .everyday
     @State private var justSaved: UUID?
     @State private var didSetUp = false
+    /// The stylist's last word, kept while the builder still shows those pieces.
+    @State private var stylistNote: (itemIDs: Set<UUID>, title: String, text: String)?
+    @State private var isStyling = false
+    private let stylist = StylistProvider.current
 
     // MARK: Options
 
@@ -103,6 +107,8 @@ struct BuilderView: View {
 
                     ThisLookPanel(items: currentItems, name: $name, occasion: $occasion,
                                   match: match, justSaved: justSaved == match?.id && match != nil,
+                                  stylistNote: currentStylistNote, isStylistBusy: isStyling,
+                                  onAskStylist: stylist == nil ? nil : critique,
                                   onSave: save)
                         .frame(width: 320)
                 }
@@ -111,6 +117,7 @@ struct BuilderView: View {
         .onAppear(perform: setUp)
         .onChange(of: nav.pieceToStyle) { setUp() }
         .onChange(of: nav.outfitToEdit) { setUp() }
+        .onChange(of: nav.stylistRequest) { setUp() }
     }
 
     private var header: some View {
@@ -123,6 +130,16 @@ struct BuilderView: View {
             }
             .padding(.top, 30)
             Spacer()
+            if stylist != nil {
+                Button(action: styleMe) {
+                    Label(isStyling ? "Styling…" : "Style me", systemImage: "sparkles")
+                }
+                .buttonStyle(.quiet)
+                .disabled(isStyling)
+                .keyboardShortcut("y", modifiers: .command)
+                .help("Ask the on-device stylist for a \(occasion.label.lowercased()) look around your locked pieces (⌘Y)")
+                .padding(.top, 30)
+            }
             Button(action: shuffle) {
                 HStack(spacing: 8) {
                     Image(systemName: "shuffle")
@@ -224,6 +241,11 @@ struct BuilderView: View {
     }
 
     private func setUp() {
+        if nav.stylistRequest != nil {
+            nav.stylistRequest = nil
+            styleMe()
+            return
+        }
         if let outfitID = nav.outfitToEdit, let outfit = store.outfits.first(where: { $0.id == outfitID }) {
             nav.outfitToEdit = nil
             animate {
@@ -284,6 +306,53 @@ struct BuilderView: View {
     private func toggleLock(_ slot: BuilderSlot) {
         withAnimation(Motion.lift) {
             if locked.contains(slot) { locked.remove(slot) } else { locked.insert(slot) }
+        }
+    }
+
+    private var currentStylistNote: (title: String, text: String)? {
+        guard let note = stylistNote, note.itemIDs == Set(currentItems.map(\.id)) else { return nil }
+        return (note.title, note.text)
+    }
+
+    /// Fills the unlocked slots with the stylist's pick for the chosen occasion.
+    private func styleMe() {
+        guard let stylist, !isStyling, !store.items.isEmpty else { return }
+        let keeping = locked.compactMap { current($0) }
+        isStyling = true
+        Task {
+            defer { isStyling = false }
+            do {
+                let looks = try await stylist.suggest(from: store.items, saved: store.outfits, occasion: occasion,
+                                                      season: .current(), keeping: keeping, count: 1)
+                guard let look = looks.first else { return }
+                animate {
+                    picks = [:]
+                    for item in look.itemIDs.compactMap({ store.item(id: $0) }) {
+                        picks[BuilderSlot.slot(for: item.category)] = item.id
+                    }
+                    name = look.name
+                }
+                stylistNote = (Set(look.itemIDs), "Stylist", look.why)
+            } catch {
+                stylistNote = (Set(currentItems.map(\.id)), "Stylist", "Couldn't put a look together: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Asks the stylist what works about the current look and what to swap.
+    private func critique() {
+        guard let stylist, !isStyling, !currentItems.isEmpty else { return }
+        let items = currentItems
+        isStyling = true
+        Task {
+            defer { isStyling = false }
+            let text: String
+            do {
+                text = try await stylist.critique(outfit: items, occasion: occasion, closet: store.items)
+            } catch {
+                text = "Couldn't read this look: \(error.localizedDescription)"
+            }
+            stylistNote = (Set(items.map(\.id)), "Stylist", text)
         }
     }
 

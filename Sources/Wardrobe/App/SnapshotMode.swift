@@ -66,6 +66,9 @@ enum SnapshotMode {
         Shot(name: "rarely-worn") { _, nav in nav.collection = .rarelyWorn },
         Shot(name: "builder") { _, nav in nav.collection = .all; nav.section = .builder },
         Shot(name: "builder-styled") { store, nav in nav.style(store.items[0]) },
+        // Waits for the on-device stylist; without Apple Intelligence this
+        // shows the builder unchanged.
+        Shot(name: "builder-stylist", wait: 10) { _, nav in nav.askStylist() },
         Shot(name: "lookbook") { _, nav in nav.section = .lookbook },
         Shot(name: "add-from-link") { _, nav in nav.section = .closet; nav.showAddFromLink = true },
     ]

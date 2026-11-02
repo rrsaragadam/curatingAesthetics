@@ -18,7 +18,10 @@ struct WardrobeApp: App {
                 .environment(nav)
                 .frame(minWidth: 1080, minHeight: 680)
                 .tint(Theme.green)
-                .task { SnapshotMode.run(store: store, nav: nav) }
+                .task {
+                    SnapshotMode.run(store: store, nav: nav)
+                    StylistBench.run()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 860)
@@ -80,9 +83,16 @@ final class AppNavigation {
     var pieceToStyle: UUID?
     /// Set from the lookbook to reopen an outfit in the builder.
     var outfitToEdit: UUID?
+    /// Set by the sidebar's stylist card; the builder asks for a look and clears this.
+    var stylistRequest: UUID?
 
     func style(_ item: ClothingItem) {
         pieceToStyle = item.id
+        section = .builder
+    }
+
+    func askStylist() {
+        stylistRequest = UUID()
         section = .builder
     }
 
