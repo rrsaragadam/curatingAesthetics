@@ -154,15 +154,17 @@ enum LookRepair {
 /// in one look. Explanations come after the picks, so they describe them.
 @available(macOS 26, *)
 struct OnDeviceStylist: Stylist {
-    /// The on-device model has a 4,096-token window. About 40 described pieces
+    /// The on-device model's window is 4,096 tokens on macOS 26 and 8,192 on
+    /// macOS 27. About 40 described pieces (with what their photos look like)
     /// leaves room for the instructions, the schema and the answer.
     static let maxPieces = 40
 
     static let instructions = """
         You are a thoughtful personal stylist. You put outfits together only from the pieces in the \
         person's closet. You pay attention to color harmony, balancing textures, matching formality to \
-        the occasion, and dressing for the season. Keep the language warm, concrete and brief, and only \
-        mention pieces that are in the outfit.
+        the occasion, and dressing for the season. A piece's "looks" note describes its photo, so trust \
+        it for pattern, texture and vibe. Keep the language warm, concrete and brief, and only mention \
+        pieces that are in the outfit.
         """
 
     private static let none = "none"
@@ -170,7 +172,7 @@ struct OnDeviceStylist: Stylist {
     func suggest(from closet: [ClothingItem], saved: [Outfit], occasion: Occasion, season: Season,
                  keeping: [ClothingItem], count: Int) async throws -> [StylistLook] {
         let pieces = Self.trim(closet, season: season, keeping: keeping)
-        let labels = Labels(pieces)
+        let labels = Labels(pieces, looks: await StylistVision.shared.descriptions(for: pieces))
         var prompt = """
             Closet:
             \(labels.text)
@@ -234,7 +236,7 @@ struct OnDeviceStylist: Stylist {
 
     func critique(outfit: [ClothingItem], occasion: Occasion, closet: [ClothingItem]) async throws -> String {
         let pieces = Self.trim(closet, season: .current(), keeping: outfit)
-        let labels = Labels(pieces)
+        let labels = Labels(pieces, looks: await StylistVision.shared.descriptions(for: pieces))
         let others = pieces.filter { p in !outfit.contains { $0.id == p.id } }
         guard !outfit.isEmpty else { return "" }
         let prompt = """
@@ -253,8 +255,22 @@ struct OnDeviceStylist: Stylist {
                   schema: DynamicGenerationSchema(type: String.self)),
         ]), dependencies: [])
         let session = LanguageModelSession(instructions: Self.instructions)
-        let content = try await session.respond(to: prompt, schema: schema,
-                                                options: GenerationOptions(maximumResponseTokens: 200)).content
+        let options = GenerationOptions(maximumResponseTokens: 200)
+        let content: GeneratedContent
+        if #available(macOS 27, *), StylistVision.isAvailable {
+            // Show the model the outfit itself, not just the notes about it.
+            var photos: [(String, URL)] = []
+            for item in outfit {
+                if let url = await StylistVision.shared.photoURL(for: item) { photos.append((labels.label(item), url)) }
+            }
+            content = try await session.respond(to: Prompt {
+                prompt
+                if !photos.isEmpty { "Photos of the outfit's pieces:" }
+                photos.map { Attachment(imageURL: $0.1).label($0.0) }
+            }, schema: schema, options: options).content
+        } else {
+            content = try await session.respond(to: prompt, schema: schema, options: options).content
+        }
         let works = ((try? content.value(String.self, forProperty: "works")) ?? "").replacingOccurrences(of: "**", with: "")
         guard let swapIn = (try? content.value(String.self, forProperty: "swapIn")).flatMap(labels.item) else { return works }
         let reason = ((try? content.value(String.self, forProperty: "reason")) ?? "").replacingOccurrences(of: "**", with: "")
@@ -277,7 +293,7 @@ struct OnDeviceStylist: Stylist {
     }
 
     private func gaps(from pieces: [ClothingItem]) async throws -> StylistGaps {
-        let labels = Labels(pieces)
+        let labels = Labels(pieces, looks: await StylistVision.shared.descriptions(for: pieces))
         let counts = Category.allCases.map { c in "\(pieces.filter { $0.category == c }.count) \(c.label.lowercased())" }
         func common(_ values: [String]) -> String {
             let tally = Dictionary(values.filter { !$0.isEmpty }.map { ($0, 1) }, uniquingKeysWith: +)
@@ -379,7 +395,7 @@ struct OnDeviceStylist: Stylist {
         private var byID: [UUID: String] = [:]
         let text: String
 
-        init(_ pieces: [ClothingItem]) {
+        init(_ pieces: [ClothingItem], looks: [UUID: String] = [:]) {
             var lines: [String] = []
             for piece in pieces {
                 var label = "\(piece.name.trimmingCharacters(in: .whitespaces)), \(piece.displayColorName.lowercased())"
@@ -388,7 +404,9 @@ struct OnDeviceStylist: Stylist {
                 while byLabel[label] != nil { label = "\(label) \(n)"; n += 1 }
                 byLabel[label] = piece
                 byID[piece.id] = label
-                lines.append("- " + label + ": " + StylistCatalog.details(for: piece))
+                var line = "- " + label + ": " + StylistCatalog.details(for: piece)
+                if let look = looks[piece.id] { line += " | looks: " + look }
+                lines.append(line)
             }
             text = lines.joined(separator: "\n")
         }

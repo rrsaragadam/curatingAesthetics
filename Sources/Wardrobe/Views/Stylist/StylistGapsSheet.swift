@@ -41,7 +41,8 @@ struct StylistGapsSheet: View {
             .frame(maxHeight: .infinity)
 
             HStack {
-                Text("Suggested on this Mac from each piece's details.")
+                Text(StylistVision.isAvailable ? "Suggested on this Mac from your photos and each piece's details."
+                                               : "Suggested on this Mac from each piece's details.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.inkTertiary)
                 Spacer()
@@ -107,6 +108,9 @@ struct StylistGapsSheet: View {
 private struct GapCard: View {
     @Environment(WardrobeStore.self) private var store
     let gap: StylistGap
+    @State private var showPinterest = false
+
+    private var query: String { ProductSearch.query(for: gap, closet: store.items) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -151,12 +155,40 @@ private struct GapCard: View {
                     }
                     .padding(.top, 2)
                 }
+                HStack(spacing: 14) {
+                    Button { showPinterest = true } label: {
+                        Label("See it on Pinterest", systemImage: "photo.on.rectangle")
+                    }
+                    Menu {
+                        if let url = ProductSearch.shoppingURL(query) {
+                            Button("Search all stores") { NSWorkspace.shared.open(url) }
+                        }
+                        let stores = ProductSearch.stores(in: store.items)
+                        if !stores.isEmpty {
+                            Section("Stores you shop at") {
+                                ForEach(stores, id: \.self) { host in
+                                    if let url = ProductSearch.storeURL(query, host: host) {
+                                        Button(host) { NSWorkspace.shared.open(url) }
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Shop", systemImage: "bag")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.top, 4)
             }
             Spacer(minLength: 0)
         }
+        .sheet(isPresented: $showPinterest) { PinterestSheet(query: query) }
         .padding(14)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line) }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 }

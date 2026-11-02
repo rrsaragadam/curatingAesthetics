@@ -19,8 +19,16 @@ struct WardrobeApp: App {
                 .frame(minWidth: 1080, minHeight: 680)
                 .tint(Theme.green)
                 .task {
+                    await StylistVision.shared.configure(
+                        imagesURL: store.imagesURL, cacheURL: store.rootURL.appendingPathComponent("stylist-photos.json"))
                     SnapshotMode.run(store: store, nav: nav)
                     StylistBench.run()
+                    // Describe new photos in the background, so the stylist
+                    // doesn't wait on them later.
+                    if !StylistBench.isActive {
+                        let items = store.items
+                        Task.detached(priority: .utility) { await StylistVision.shared.warm(items) }
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)

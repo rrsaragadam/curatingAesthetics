@@ -4,7 +4,9 @@ import Foundation
 /// Debug-only stylist check. With `WARDROBE_STYLIST_BENCH=<file.md>` set, the
 /// app asks the stylist for looks, critiques and gaps on the sample closet and
 /// on a read-only copy of the real library, times every call, writes a report
-/// and quits. Nothing is saved to either library.
+/// and quits. Nothing is saved to either library; photo descriptions are
+/// cached next to the report, so delete that file to time them from scratch.
+/// `WARDROBE_STYLIST_BENCH_LIBRARY_ONLY=1` skips the sample closet.
 @MainActor
 enum StylistBench {
     static let outputURL: URL? = ProcessInfo.processInfo.environment["WARDROBE_STYLIST_BENCH"]
@@ -21,9 +23,12 @@ enum StylistBench {
                 finish(report, to: outputURL)
                 return
             }
-            let sample = SampleCloset.make()
-            report += await bench(stylist, title: "Sample closet", closet: sample.items, saved: sample.outfits)
+            if ProcessInfo.processInfo.environment["WARDROBE_STYLIST_BENCH_LIBRARY_ONLY"] == nil {
+                let sample = SampleCloset.make()
+                report += await bench(stylist, title: "Sample closet", closet: sample.items, saved: sample.outfits)
+            }
             if let real = realLibrary(), !real.items.isEmpty {
+                report += await describePhotos(real.items)
                 report += await bench(stylist, title: "Your library", closet: real.items, saved: real.outfits)
             }
             finish(report, to: outputURL)
@@ -121,6 +126,20 @@ enum StylistBench {
             + "fastest \(String(format: "%.1f", sorted.first ?? 0))s, slowest \(String(format: "%.1f", sorted.last ?? 0))s\n"
         out += "- Looks: \(looksTotal), repaired by the app: \(repaired)\n\n"
         return out
+    }
+
+    /// Times describing every photo in the library, and lists what the model saw.
+    private static func describePhotos(_ items: [ClothingItem]) async -> String {
+        guard StylistVision.isAvailable else { return "Photos: this Mac's model can't read images, so the stylist uses text only.\n\n" }
+        let library = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Wardrobe", isDirectory: true)
+        await StylistVision.shared.configure(imagesURL: library.appendingPathComponent("Images", isDirectory: true),
+                                             cacheURL: outputURL!.deletingLastPathComponent().appendingPathComponent("stylist-photos.json"))
+        let start = Date()
+        let looks = await StylistVision.shared.descriptions(for: items)
+        var out = "## Photos (\(looks.count) described in \(String(format: "%.1f", Date().timeIntervalSince(start)))s)\n\n"
+        for item in items { if let look = looks[item.id] { out += "- \(item.name): \(look)\n" } }
+        return out + "\n"
     }
 
     private static func randomLook(from closet: [ClothingItem]) -> [ClothingItem] {
