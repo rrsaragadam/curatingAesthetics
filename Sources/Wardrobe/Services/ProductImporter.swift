@@ -588,7 +588,8 @@ enum CategoryGuesser {
         let rules: [(Category, [String])] = [
             (.shoes, ["sneaker", "trainer", "loafer", "boot", "shoe", "sandal", "derby", "oxford shoe", "mule", "heel", "espadrille", "slipper"]),
             (.dress, ["dress", "jumpsuit", "romper", "overall", "gown"]),
-            (.outerwear, ["jacket", "coat", "parka", "blazer", "anorak", "overshirt", "chore", "trench", "puffer", "gilet", "vest", "bomber"]),
+            (.jacket, ["jacket", "blazer", "overshirt", "shacket", "chore", "bomber", "trucker", "harrington", "windbreaker", "sport coat"]),
+            (.outerwear, ["coat", "parka", "anorak", "trench", "puffer", "gilet", "vest"]),
             (.bottom, ["jean", "trouser", "pants", "chino", "shorts", "skirt", "legging", "jogger"]),
             (.accessory, ["bag", "tote", "belt", "scarf", "hat", "beanie", "cap", "sock", "wallet", "sunglass", "glove", "tie", "watch", "necklace", "ring", "bracelet"]),
             (.top, ["shirt", "tee", "t-shirt", "henley", "polo", "sweater", "crewneck", "cardigan", "hoodie", "sweatshirt", "blouse", " top", "tank", "knit", "jumper", "turtleneck"]),

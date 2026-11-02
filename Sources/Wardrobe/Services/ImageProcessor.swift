@@ -70,11 +70,12 @@ enum ImageProcessor {
 
             var top: CGFloat, bottom: CGFloat, xRange: [CGFloat], padX: CGFloat
             switch category {
-            case .top, .outerwear:
+            case .top, .jacket, .outerwear:
                 guard let s = shoulders.min(), !arms.isEmpty else { return nil }
                 top = s - 0.05
                 // A half-length shot ends above the hips; the piece runs to the edge.
-                bottom = hips.max().map { $0 + (category == .outerwear ? 0.14 : 0.07) } ?? 1
+                let below: CGFloat = category == .outerwear ? 0.14 : category == .jacket ? 0.1 : 0.07
+                bottom = hips.max().map { $0 + below } ?? 1
                 xRange = arms; padX = 0.07
             case .dress:
                 guard let s = shoulders.min(), let low = (ankles + knees).max(), !arms.isEmpty else { return nil }
@@ -228,7 +229,8 @@ enum ImageProcessor {
         let rules: [(Category, [String])] = [
             (.shoes, ["shoe", "sneaker", "boot", "sandal", "footwear", "loafer", "heel"]),
             (.dress, ["dress", "gown", "jumpsuit"]),
-            (.outerwear, ["coat", "jacket", "parka", "blazer", "vest"]),
+            (.outerwear, ["coat", "parka", "vest"]),
+            (.jacket, ["jacket", "blazer"]),
             (.bottom, ["jeans", "pants", "trouser", "shorts", "skirt", "denim"]),
             (.accessory, ["bag", "handbag", "purse", "backpack", "hat", "cap", "scarf", "belt", "sunglasses",
                           "eyeglasses", "watch", "jewelry", "necklace", "tie"]),

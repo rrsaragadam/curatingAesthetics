@@ -7,6 +7,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
     case top
     case bottom
     case dress
+    case jacket
     case outerwear
     case shoes
     case accessory
@@ -18,6 +19,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .top: return "Tops"
         case .bottom: return "Bottoms"
         case .dress: return "Dresses"
+        case .jacket: return "Jackets"
         case .outerwear: return "Outerwear"
         case .shoes: return "Shoes"
         case .accessory: return "Accessories"
@@ -29,6 +31,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .top: return "Top"
         case .bottom: return "Bottom"
         case .dress: return "Dress"
+        case .jacket: return "Jacket"
         case .outerwear: return "Outerwear"
         case .shoes: return "Shoes"
         case .accessory: return "Accessory"
@@ -40,6 +43,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .top: return "tshirt"
         case .bottom: return "rectangle.split.2x1"
         case .dress: return "figure.stand.dress"
+        case .jacket: return "jacket"
         case .outerwear: return "wind"
         case .shoes: return "shoe"
         case .accessory: return "bag"
